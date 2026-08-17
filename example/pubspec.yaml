@@ -1,4 +1,4 @@
-name: zenpay_reference_backend
+name: zenpay_dart_example
 description: Reference merchant backend for ZenPay Hosted Checkout.
 publish_to: none
 version: 0.1.0-dev.1

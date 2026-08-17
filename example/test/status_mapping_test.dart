@@ -1,5 +1,5 @@
 import 'package:test/test.dart';
-import 'package:zenpay_reference_backend/src/checkout_state.dart';
+import 'package:zenpay_dart_example/src/checkout_state.dart';
 
 void main() {
   test('maps documented ZenPay status codes', () {

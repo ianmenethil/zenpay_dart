@@ -17,10 +17,10 @@ import 'package:zenpay_dart/zenpay_dart.dart'
         ZpCallbackUrlTokenPayload,
         ZpPluginMode,
         createZpCallbackUrlToken;
-import 'package:zenpay_reference_backend/src/checkout_state.dart';
-import 'package:zenpay_reference_backend/src/config.dart';
-import 'package:zenpay_reference_backend/src/rate_limiter.dart';
-import 'package:zenpay_reference_backend/src/server_app.dart';
+import 'package:zenpay_dart_example/src/checkout_state.dart';
+import 'package:zenpay_dart_example/src/config.dart';
+import 'package:zenpay_dart_example/src/rate_limiter.dart';
+import 'package:zenpay_dart_example/src/server_app.dart';
 
 const _token = 'test-bearer-token-value';
 const _apiKey = 'test-api-key';

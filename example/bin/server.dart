@@ -6,9 +6,9 @@ import 'dart:io';
 
 import 'package:shelf/shelf_io.dart' as shelf_io;
 
-import 'package:zenpay_reference_backend/src/checkout_state.dart';
-import 'package:zenpay_reference_backend/src/config.dart';
-import 'package:zenpay_reference_backend/src/server_app.dart';
+import 'package:zenpay_dart_example/src/checkout_state.dart';
+import 'package:zenpay_dart_example/src/config.dart';
+import 'package:zenpay_dart_example/src/server_app.dart';
 
 Future<void> main() async {
   final config = loadConfig();

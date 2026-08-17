@@ -9,9 +9,9 @@ library;
 import 'package:test/test.dart';
 import 'package:zenpay_dart/zenpay_dart.dart'
     show verifyZpCallbackUrlToken, ZpCallbackUrlTokenVerified;
-import 'package:zenpay_reference_backend/src/checkout_state.dart';
-import 'package:zenpay_reference_backend/src/config.dart';
-import 'package:zenpay_reference_backend/src/session_service.dart';
+import 'package:zenpay_dart_example/src/checkout_state.dart';
+import 'package:zenpay_dart_example/src/config.dart';
+import 'package:zenpay_dart_example/src/session_service.dart';
 
 AppConfig _config({String callbackTokenSecret = ''}) => AppConfig(
   port: 7000,

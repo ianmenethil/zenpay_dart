@@ -9,9 +9,9 @@
 library;
 
 import 'package:test/test.dart';
-import 'package:zenpay_reference_backend/src/checkout_state.dart';
-import 'package:zenpay_reference_backend/src/config.dart';
-import 'package:zenpay_reference_backend/src/security.dart';
+import 'package:zenpay_dart_example/src/checkout_state.dart';
+import 'package:zenpay_dart_example/src/config.dart';
+import 'package:zenpay_dart_example/src/security.dart';
 
 const _credentials = ZenPayCredentials(
   merchantCode: 'code',

@@ -1,6 +1,6 @@
 import 'package:test/test.dart';
-import 'package:zenpay_reference_backend/src/config.dart';
-import 'package:zenpay_reference_backend/src/session_service.dart';
+import 'package:zenpay_dart_example/src/config.dart';
+import 'package:zenpay_dart_example/src/session_service.dart';
 
 AppConfig _configWithHosts(Set<String> hosts) => AppConfig(
   port: 7000,

@@ -11,7 +11,7 @@ Pure-Dart backend SDK for the ZenPay Hosted Checkout Plugin (HCP). Provides SHA3
 | Package | Path | Description |
 | :--- | :--- | :--- |
 | `zenpay_dart` | `lib/` | Core SDK: cryptographic fingerprinting, checkout URL builder, callback verifier, callback URL token signer, wire enums. |
-| `zenpay_reference_backend` | `example/` | Reference merchant backend: Shelf HTTP server demonstrating session creation, status polling, callback handling, and browser-return brokering. |
+| `zenpay_dart_example` | `example/` | Reference merchant backend: Shelf HTTP server demonstrating session creation, status polling, callback handling, and browser-return brokering. |
 
 ---
 
