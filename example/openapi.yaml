@@ -1,0 +1,372 @@
+openapi: 3.1.0
+info:
+  title: ZenPay Flutter reference merchant backend
+  version: 0.1.0-dev.1
+  description: >
+    Reference contract between the merchant Flutter application and the merchant
+    backend under `samples/backend`. This is not the private ZenPay REST API.
+
+    App-facing routes live under `/api/v1`. ZenPay redirects the browser to
+    `GET /return`; ZenPay posts server callbacks to `POST /api/v1/callbacks`.
+servers:
+  - url: http://localhost:7000
+paths:
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      summary: Service and configuration readiness
+      responses:
+        "200":
+          description: Always 200 when the process is up; readiness flags reflect env.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                  - ok
+                  - sessionReady
+                  - callbackReady
+                  - missingSessionConfiguration
+                  - missingCallbackConfiguration
+                properties:
+                  ok: { type: boolean, const: true }
+                  sessionReady: { type: boolean }
+                  callbackReady: { type: boolean }
+                  missingSessionConfiguration:
+                    type: array
+                    items: { type: string }
+                  missingCallbackConfiguration:
+                    type: array
+                    items: { type: string }
+  /.well-known/assetlinks.json:
+    get:
+      operationId: getAndroidAssetLinks
+      summary: Android App Links verification file
+      description: >
+        Streams `samples/app/platform_config/android/assetlinks.json` when present.
+        Used for Digital Asset Links verification of the sample app's App Links.
+      responses:
+        "200":
+          description: assetlinks.json body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+        "404":
+          $ref: "#/components/responses/Problem"
+  /api/v1/sessions:
+    post:
+      operationId: createSession
+      summary: Create a checkout session (merchant → ZenPay `/v2/sessions`)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 16
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: >
+            New session, or an idempotent replay of the same key with the same
+            request body (handler always answers 201).
+          headers:
+            Cache-Control:
+              schema: { type: string }
+              example: no-store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "400":
+          description: >
+            INVALID_IDEMPOTENCY_KEY, INVALID_CHECKOUT_*, UNKNOWN_CHECKOUT_FIELD,
+            BAD_REQUEST (missing/non-positive paymentAmount), REQUEST_BODY_*,
+            INVALID_JSON
+          $ref: "#/components/responses/Problem"
+        "401":
+          description: UNAUTHORIZED
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: IDEMPOTENCY_KEY_REUSED — same key, different request body
+          $ref: "#/components/responses/Problem"
+        "413":
+          description: REQUEST_BODY_TOO_LARGE
+          $ref: "#/components/responses/Problem"
+        "415":
+          description: APPLICATION_JSON_REQUIRED
+          $ref: "#/components/responses/Problem"
+        "429":
+          description: RATE_LIMITED
+          $ref: "#/components/responses/Problem"
+        "503":
+          description: SESSION_CONFIGURATION_REQUIRED:…
+          $ref: "#/components/responses/Problem"
+  /api/v1/sessions/{merchantUniquePaymentId}:
+    get:
+      operationId: getSession
+      summary: Authoritative payment state for an attempt
+      description: >
+        Authorizes on the merchant app's bearer token alone — see
+        `README.md` § Security model for the tradeoff this implies.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: merchantUniquePaymentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Merchant-owned authoritative payment state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutStatus"
+        "401":
+          description: UNAUTHORIZED
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: CHECKOUT_NOT_FOUND — merchantUniquePaymentId is unknown.
+          $ref: "#/components/responses/Problem"
+        "429":
+          description: RATE_LIMITED
+          $ref: "#/components/responses/Problem"
+  /return:
+    get:
+      operationId: brokerBrowserReturn
+      summary: ZenPay browser redirect broker
+      description: >
+        Receives the ZenPay browser redirect, validates merchant correlation,
+        discards browser-visible payment result fields, and redirects to the
+        merchant's verified App Link / Universal Link (mobile) or web app
+        origin (web).
+
+        Frame-mode attempts (`client: webFrame`) answer 200 with an HTML page
+        instead: their return resolves inside the iframe, where a 303 to the
+        app origin would be unreadable cross-origin, so the page posts the
+        correlation values to `window.parent` against a fixed target origin.
+      parameters:
+        - name: attempt
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: >
+            Frame-mode only. An HTML page that posts `{ merchantUniquePaymentId }` to
+            window.parent against the configured app origin, never "*".
+          content:
+            text/html:
+              schema: { type: string }
+        "303":
+          description: Clean redirect to the merchant application (`?merchantUniquePaymentId=`)
+          headers:
+            Location:
+              required: true
+              schema: { type: string, format: uri }
+        "400":
+          description: RETURN_CORRELATION_REQUIRED or RETURN_CORRELATION_INVALID
+          $ref: "#/components/responses/Problem"
+  /api/v1/callbacks:
+    post:
+      operationId: receiveZenPayCallback
+      summary: ZenPay server-to-server callback
+      description: >
+        Receives the ZenPay callback and verifies ValidationCode before updating
+        merchant payment state. Not bearer-authenticated; verification is via
+        the callback ValidationCode and stored attempt correlation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: >
+                ZenPay callback envelope. Must include `response.merchantUniquePaymentId`.
+      responses:
+        "200":
+          description: Callback verified and processed idempotently
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [ok]
+                properties:
+                  ok: { type: boolean, const: true }
+        "400":
+          description: >
+            CALLBACK_MERCHANT_PAYMENT_ID_REQUIRED, CALLBACK_BODY_INVALID,
+            REQUEST_BODY_*, INVALID_JSON
+          $ref: "#/components/responses/Problem"
+        "401":
+          description: CALLBACK_VALIDATION_FAILED
+          $ref: "#/components/responses/Problem"
+        "404":
+          description: CALLBACK_ATTEMPT_NOT_FOUND
+          $ref: "#/components/responses/Problem"
+        "409":
+          description: >
+            CALLBACK_CONFLICT — a verified callback already resolved this
+            attempt with different values.
+          $ref: "#/components/responses/Problem"
+        "413":
+          description: REQUEST_BODY_TOO_LARGE
+          $ref: "#/components/responses/Problem"
+        "415":
+          description: APPLICATION_JSON_REQUIRED
+          $ref: "#/components/responses/Problem"
+        "429":
+          description: RATE_LIMITED
+          $ref: "#/components/responses/Problem"
+        "503":
+          description: CALLBACK_CONFIGURATION_REQUIRED:…
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: MerchantAccessToken
+  schemas:
+    CreateSessionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - orderId
+        - customerName
+        - customerEmail
+        - client
+        - paymentAmount
+      properties:
+        orderId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Merchant order or invoice identifier.
+        customerName:
+          type: string
+          minLength: 1
+          maxLength: 250
+        customerEmail:
+          type: string
+          format: email
+          maxLength: 254
+        mode:
+          type: integer
+          enum: [0, 1, 2, 3]
+          default: 0
+          description: ZenPay session mode; omitted defaults to 0 (make payment).
+        client:
+          type: string
+          enum: [web, mobile, webFrame]
+          description: >
+            Which kind of client is starting the checkout. Selects the
+            configured return URI: the app's own origin for web / webFrame, or
+            the verified App Link / Universal Link for mobile. The client names
+            its kind but never supplies a URL, so this cannot be used to
+            redirect the browser off the merchant's own hosts.
+
+            webFrame is web checkout presented in an iframe. It makes the
+            return broker answer with a postMessage page instead of a 303 —
+            see `/return`.
+        paymentAmount:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 999999
+          description: >
+            Amount in major currency units. Required by this reference backend
+            for every create (including modes that ZenPay itself may not bill).
+        customerReference:
+          type: string
+          minLength: 1
+          maxLength: 128
+        contactNumber:
+          type: string
+          minLength: 1
+          maxLength: 32
+    CheckoutSession:
+      type: object
+      additionalProperties: false
+      required:
+        - merchantUniquePaymentId
+        - mode
+        - checkoutUrl
+        - returnUri
+      properties:
+        merchantUniquePaymentId: { type: string }
+        mode: { type: integer, enum: [0, 1, 2, 3] }
+        checkoutUrl:
+          type: string
+          format: uri
+          pattern: "^https://"
+        returnUri:
+          type: string
+          format: uri
+          pattern: "^https://"
+    CheckoutStatus:
+      type: object
+      additionalProperties: false
+      required: [merchantUniquePaymentId, status, callbackVerified]
+      properties:
+        merchantUniquePaymentId: { type: string }
+        status:
+          type: string
+          enum:
+            - created
+            - sessionCreated
+            - browserReturned
+            - pending
+            - successful
+            - failed
+            - cancelled
+            - error
+            - unknown
+        callbackVerified:
+          type: boolean
+          description: >
+            True only once a ZenPay callback reached this server and passed
+            ValidationCode verification. This is the only field that
+            distinguishes a confirmed payment from one the browser merely
+            claimed: status alone can reach a terminal value from the browser
+            return, which proves nothing.
+        zenPayStatusCode:
+          type: integer
+          description: >
+            ZenPay's own numeric paymentStatus, recorded from the verified
+            callback. Absent until a callback has been verified.
+        paymentReference: { type: string }
+        preauthReference: { type: string }
+        tokenReference: { type: string }
+        failureCode: { type: string }
+        failureReason: { type: string }
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error: { type: string }
+  responses:
+    Problem:
+      description: Request failed (`{ "error": "<CODE>" }`)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Problem"

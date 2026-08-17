@@ -1,0 +1,16 @@
+{
+  "zenpay-verify": {
+    "PostToolUse": [
+      {
+        "matcher": "replace_file_content|write_to_file|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dart format --output=none --set-exit-if-changed . && dart analyze --fatal-infos && dart test && cd example && dart analyze --fatal-infos && dart test",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

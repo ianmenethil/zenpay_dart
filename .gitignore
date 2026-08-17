@@ -1,0 +1,22 @@
+# Dart
+.dart_tool/
+.packages
+.pub/
+build/
+coverage/
+pubspec_overrides.yaml
+
+# Secrets and local state
+.env
+example/.env
+example/data/
+
+!example/.env.example
+
+# Editors and OS
+.idea/
+.vscode/
+.claude/
+*.iml
+.DS_Store
+*.bak

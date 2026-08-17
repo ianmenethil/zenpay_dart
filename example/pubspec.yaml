@@ -1,0 +1,19 @@
+name: zenpay_reference_backend
+description: Reference merchant backend for ZenPay Hosted Checkout.
+publish_to: none
+version: 0.1.0-dev.1
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  dotenv: ^4.2.0
+  hashlib: ^2.4.2
+  shelf: ^1.4.2
+  zenpay_dart:
+    path: ../
+
+dev_dependencies:
+  http: ^1.6.0
+  lints: ^6.1.0
+  test: ^1.31.0

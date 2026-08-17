@@ -1,0 +1,61 @@
+{
+  "_comment": "Non-secret synthetic inputs and expected outputs, computed independently of both the installed @ianmenethil/zp-hcp package and this Dart implementation — never recomputed with the code under test. sha3512Hex vectors via Python's hashlib.sha3_512; callback vectors ported unchanged from samples/backend/test/callback_verification_test.dart (itself independently computed via Python).",
+  "sha3512": {
+    "input": "hello-zenpay",
+    "hex": "95a1e714530584f59108a02499be26d849307197028ed61b9d05ec8c5534e13bcd1c1904bbce4f6ca4cb448a2efe9a289a4ffc151afe9679a470991925c03207"
+  },
+  "fingerprint": {
+    "apiKey": "golden-api-key",
+    "username": "golden-username",
+    "password": "golden-password",
+    "mode": 0,
+    "paymentAmount": "25.50",
+    "merchantUniquePaymentId": "golden-mupid-0001",
+    "timestamp": "2026-01-15T10:30:00",
+    "pipe": "golden-api-key|golden-username|golden-password|0|2550|golden-mupid-0001|2026-01-15T10:30:00",
+    "fingerprintHex": "6507cc9dfce49db22007e94e148cf0be5669682bfa80e76be85dc5358d416c83d3b6e29ce3479e40f197a507e346a9978a9f0c8cd38bf9c2bf06bbcd2719c943"
+  },
+  "callbackToken": {
+    "secret": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "body": "eyJtIjowLCJ1IjoiZ29sZGVuLW11cGlkLTAwMDEiLCJ0IjoiMjAyNi0wMS0xNVQxMDozMDowMCIsImlhdCI6MTAwfQ",
+    "signatureBase64Url": "A7NbcdZtqAG-Q5oS8WOInQ",
+    "token": "eyJtIjowLCJ1IjoiZ29sZGVuLW11cGlkLTAwMDEiLCJ0IjoiMjAyNi0wMS0xNVQxMDozMDowMCIsImlhdCI6MTAwfQA7NbcdZtqAG-Q5oS8WOInQ",
+    "decodedPayload": {
+      "mode": 0,
+      "merchantUniquePaymentId": "golden-mupid-0001",
+      "timestamp": "2026-01-15T10:30:00"
+    }
+  },
+  "credentials": {
+    "apiKey": "golden-api-key",
+    "username": "golden-username",
+    "password": "golden-password"
+  },
+  "mupid": "golden-mupid-0001",
+  "callbacks": {
+    "mode0Payment": {
+      "mode": 0,
+      "paymentAmount": 25.5,
+      "reference": "golden-ref-mode0",
+      "validationCode": "32b527d357f16fccc2d27e702b2a9dd809e8e4608e6c85b6ebea86187d0fbb8c19e7c28448d528121e52799c4d3ebef284100fab926ce3f1ec92c7bbec93bd78"
+    },
+    "mode1Tokenise": {
+      "mode": 1,
+      "paymentAmount": 0,
+      "reference": "golden-ref-mode1",
+      "validationCode": "ad84c04afdaa3f6a47ea4e8a77dd26df3b020239f3f600b750f1a08eb95364344c53ceb01c0f1cd2b195b4a400469343a0248b45de440862a80f7d7cfe363e62"
+    },
+    "mode2CustomPayment": {
+      "mode": 2,
+      "paymentAmount": 99.99,
+      "reference": "golden-ref-mode2",
+      "validationCode": "e5611313a0ee041aa8ade96a9b3f00532a88cf549c3c876fcbf7bb86b4dce76a0243c97a38a4bb832daaf256c147528ca3218368db4b9de9fee95b1b2a61548b"
+    },
+    "mode3Preauthorization": {
+      "mode": 3,
+      "paymentAmount": 10.0,
+      "reference": "golden-ref-mode3",
+      "validationCode": "550b27ef47603d1af6860ad4dfbdf2cb237b4e48e03a9b98a2e29245a03c74dc2be17686d3c0566dbb50a68d9d1eabab7904680479d245c1b7abe2654f173301"
+    }
+  }
+}
