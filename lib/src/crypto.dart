@@ -10,8 +10,7 @@ import 'package:hashlib/random.dart';
 import 'enums.dart';
 
 final _amountPattern = RegExp(r'^\d+(?:\.\d{1,2})?$');
-final _timestampPattern =
-    RegExp(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$');
+final _timestampPattern = RegExp(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$');
 
 const _zeroCents = ZpCents('0');
 
@@ -61,10 +60,9 @@ ZpCents? zpAmountToCents(Object? amount) {
   final fraction = parts.length > 1 ? parts[1] : '';
 
   return ZpCents(
-    (
-      BigInt.parse(whole) * BigInt.from(100) +
-      BigInt.parse(fraction.padRight(2, '0'))
-    ).toString(),
+    (BigInt.parse(whole) * BigInt.from(100) +
+            BigInt.parse(fraction.padRight(2, '0')))
+        .toString(),
   );
 }
 
@@ -72,10 +70,7 @@ ZpCents? zpAmountToCents(Object? amount) {
 ///
 /// Custom Payment always hashes `"0"`. Tokenise hashes `"0"` when no amount
 /// is supplied. Other values are converted from dollars to cents.
-ZpCents? resolveZpHashAmountField(
-  ZpPluginMode mode,
-  Object? amount,
-) =>
+ZpCents? resolveZpHashAmountField(ZpPluginMode mode, Object? amount) =>
     switch (mode) {
       ZpPluginMode.customPayment => _zeroCents,
       ZpPluginMode.tokenise
@@ -128,17 +123,15 @@ enum ZpAmountFailureReason {
 ///
 /// Generates 16 random bytes encoded as unpadded base64url. Create a new value
 /// for every plugin open; do not reuse a previous payment attempt's MUPID.
-ZpMupid createZpMupid() => ZpMupid(
-  base64Url.encode(randomBytes(16)).replaceAll(zpBase64Padding, ''),
-);
+ZpMupid createZpMupid() =>
+    ZpMupid(base64Url.encode(randomBytes(16)).replaceAll(zpBase64Padding, ''));
 
 /// Creates the UTC timestamp required by ZenPay.
 ///
 /// Create a fresh timestamp for every plugin open and use this exact value in
 /// both the fingerprint and Authorise request.
-ZpTimestamp createZpTimestamp() => ZpTimestamp(
-  DateTime.now().toUtc().toIso8601String().substring(0, 19),
-);
+ZpTimestamp createZpTimestamp() =>
+    ZpTimestamp(DateTime.now().toUtc().toIso8601String().substring(0, 19));
 
 /// Whether [timestamp] matches the `yyyy-MM-ddTHH:mm:ss` wire format.
 bool isValidZpTimestamp(String timestamp) =>
