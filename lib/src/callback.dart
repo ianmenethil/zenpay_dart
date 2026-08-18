@@ -1,84 +1,33 @@
-/// Incoming HCP callback verification: one verifier, [verifyZpCallback],
-/// over a single SHA3-512 hash check.
+/// Incoming HCP callback verification.
 ///
-/// A verified result proves callback *authenticity*, not payment *success*
-/// — check [ZpCallbackVerified.statusCode] against [ZpPaymentStatus]
-/// separately.
+/// A verified result proves callback *authenticity*, not payment *success*.
+/// Check [ZpCallbackVerified.statusCode] against [ZpPaymentStatus] separately.
 library;
 
 import 'crypto.dart';
 import 'enums.dart';
 
-const _minCredentialLength = 5;
 final _validationCodePattern = RegExp(r'^[0-9a-f]{128}$');
 
-// Wire / JSON field names
-const _fieldResponse = 'response';
-const _fieldValidationCode = 'validationCode';
-const _fieldMerchantUniquePaymentId = 'merchantUniquePaymentId';
-const _fieldPaymentStatus = 'paymentStatus';
-const _fieldPreauthStatus = 'preauthStatus';
-const _fieldFailureCode = 'failureCode';
-const _fieldFailureReason = 'failureReason';
-
-// Business-data fields shared by payment (mode 0/2) and preauth (mode 3)
-// responses — never card/account-shaped, safe to surface on the result.
-const _fieldCustomerReference = 'customerReference';
-const _fieldMerchantCode = 'merchantCode';
-const _fieldAdditionalReference = 'additionalReference';
-const _fieldBaseAmount = 'baseAmount';
-const _fieldCustomerFee = 'customerFee';
-const _fieldProcessorReference = 'processorReference';
-const _fieldProcessingDate = 'processingDate';
-const _fieldTransactionSource = 'transactionSource';
-const _fieldTransactionSourceString = 'transactionSourceString';
-
-// Payment-only (mode 0/2) business-data fields.
-const _fieldPaymentStatusString = 'paymentStatusString';
-const _fieldFundsToMerchant = 'fundsToMerchant';
-const _fieldSettlementDate = 'settlementDate';
-const _fieldIsPaymentSettledToMerchant = 'isPaymentSettledToMerchant';
-const _fieldProcessedAmount = 'processedAmount';
-const _fieldPayToStatus = 'payToStatus';
-const _fieldSku1 = 'sku1';
-const _fieldSku2 = 'sku2';
-const _fieldAdditionalData = 'additionalData';
-const _fieldAuthCode = 'authCode';
-const _fieldRrn = 'rrn';
-const _fieldStan = 'stan';
-
-// Preauth-only (mode 3) business-data fields.
-const _fieldPreauthStatusString = 'preauthStatusString';
-const _fieldPreauthAmount = 'preauthAmount';
-const _fieldPreauthExpiryAt = 'preauthExpiryAt';
-
-// Tokenise-only (mode 1) business-data fields.
-const _fieldPaymentDetail = 'paymentDetail';
-const _fieldMerchantFee = 'merchantFee';
-const _fieldProcessingAmount = 'processingAmount';
-const _fieldPaymentAmount = 'paymentAmount';
-const _fieldDoRedirect = 'doRedirect';
-
-// Delimiters
-const _pipeDelimiter = '|';
-
-// Validation error messages
 const _errValidationCodeHex =
     'validationCode must be a 128-character hex string';
+
 const _errCredentialLength =
     'apiKey, username, password, and merchantUniquePaymentId must each '
     'be at least 5 characters';
-const _errPaymentAmountNumber = 'paymentAmount must be a valid number';
-const _errPaymentAmountPositive = 'paymentAmount must be greater than 0';
+
 const _errPaymentAmountInvalid = 'paymentAmount is invalid';
+
 const _errValidationCodeMismatch =
     'validationCode does not match the computed hash';
+
 const _errMupidMismatch =
     'response.merchantUniquePaymentId does not match the launched attempt';
+
 const _errMalformedBody =
     'body must contain a response object and a validationCode string';
 
-/// Merchant-known credentials, amount, and mupid used to verify a callback.
+/// Merchant-known credentials, amount, and MUPID used to verify a callback.
 class ZpVerifyCallbackContext {
   /// Creates the context [verifyZpCallback] hashes against.
   const ZpVerifyCallbackContext({
@@ -98,27 +47,29 @@ class ZpVerifyCallbackContext {
   /// Merchant password — hash field 3.
   final String password;
 
-  /// Payment amount in dollars, as launched — hash field 5. Ignored for
-  /// mode 2 (always hashes `"0"`); may be `0`/absent for mode 1.
+  /// Payment amount in dollars, as launched — hash field 5.
+  ///
+  /// Ignored for mode 2, which always hashes `"0"`. May be `0` for mode 1.
   final Object paymentAmount;
 
-  /// Per-payment idempotency key — hash field 6. Also checked (when the
-  /// callback body echoes one) against the response's own
-  /// `merchantUniquePaymentId`, so a callback cannot be replayed against
-  /// the wrong attempt even with a valid hash.
+  /// Per-payment idempotency key — hash field 6.
+  ///
+  /// When the callback echoes its own `merchantUniquePaymentId`, that value
+  /// is also checked against this value.
   final ZpMupid merchantUniquePaymentId;
 }
 
-/// Result of [verifyZpCallback]: exhaustively pattern-match with a `switch`
-/// over [ZpCallbackVerified] / [ZpCallbackMalformed] / [ZpCallbackRejected].
+/// Result of [verifyZpCallback].
+///
+/// Exhaustively pattern-match with a `switch` over [ZpCallbackVerified],
+/// [ZpCallbackMalformed], and [ZpCallbackRejected].
 sealed class ZpCallbackResult {
   const ZpCallbackResult();
 }
 
-/// Acquirer auth-trace fields nested in a payment (mode 0/2) response's
-/// `additionalData`. Trace numbers, not card data — safe to surface.
+/// Acquirer authorization trace fields returned in `additionalData`.
 final class ZpCallbackAdditionalData {
-  /// Creates acquirer auth-trace data from a callback response.
+  /// Creates acquirer authorization trace data.
   const ZpCallbackAdditionalData({this.authCode, this.rrn, this.stan});
 
   /// Card-network authorization code.
@@ -131,9 +82,9 @@ final class ZpCallbackAdditionalData {
   final String? stan;
 }
 
-/// Fee breakdown nested in a tokenise (mode 1) response's `paymentDetail`.
+/// Fee breakdown returned by a tokenisation callback.
 final class ZpTokenisePaymentDetail {
-  /// Creates a fee breakdown from a tokenise callback response.
+  /// Creates a tokenisation payment-detail result.
   const ZpTokenisePaymentDetail({
     this.customerFee,
     this.merchantFee,
@@ -150,19 +101,14 @@ final class ZpTokenisePaymentDetail {
   /// Amount actually processed.
   final num? processingAmount;
 
-  /// Payment amount associated with the tokenise attempt.
+  /// Payment amount associated with the tokenisation attempt.
   final num? paymentAmount;
 }
 
-/// An authentic callback. [statusCode] is a raw [ZpPaymentStatus] wire
-/// value — check [ZpPaymentStatus.isSuccessful], do not compare to a
-/// literal.
+/// An authentic callback.
 ///
-/// Every field below `failureReason` is business/reconciliation data, never
-/// card- or account-shaped — see the PCI test in `callback_test.dart`
-/// ("card/account-shaped optional callback fields do not affect
-/// verification"). Fields not applicable to [statusCode]'s originating
-/// mode are `null` (e.g. [preauthAmount] is only ever set for mode 3).
+/// [statusCode] is a raw [ZpPaymentStatus] wire value. Check
+/// [ZpPaymentStatus.isSuccessful] rather than comparing against a literal.
 final class ZpCallbackVerified extends ZpCallbackResult {
   /// Creates an authentic callback verification result.
   const ZpCallbackVerified({
@@ -170,10 +116,12 @@ final class ZpCallbackVerified extends ZpCallbackResult {
     required this.statusCode,
     this.failureCode,
     this.failureReason,
+    this.customerName,
     this.customerReference,
     this.merchantUniquePaymentId,
     this.merchantCode,
     this.additionalReference,
+    this.cardCategory,
     this.baseAmount,
     this.customerFee,
     this.processorReference,
@@ -189,31 +137,38 @@ final class ZpCallbackVerified extends ZpCallbackResult {
     this.sku1,
     this.sku2,
     this.additionalData,
+    this.token,
+    this.cardInformationSaved,
+    this.cardTypeValue,
+    this.cardTypeString,
+    this.subCardTypeString,
     this.preauthAmount,
     this.preauthExpiryAt,
     this.paymentDetail,
     this.doRedirect,
+    this.cardType,
+    this.isRestrictedCard,
   });
 
-  /// The mode-specific reference: `paymentReference`, `preauthReference`,
-  /// or `token`.
+  /// Mode-specific payment, preauthorization, or token reference.
   final String reference;
 
   /// Raw payment status code returned by ZenPay.
   final int statusCode;
 
-  /// Optional failure code if payment failed.
+  /// Optional failure code.
   final String? failureCode;
 
-  /// Optional failure reason string if payment failed.
+  /// Optional failure reason.
   final String? failureReason;
 
-  // Shared by payment (mode 0/2) and preauth (mode 3).
+  /// Customer name echoed from launch.
+  final String? customerName;
 
   /// Customer reference echoed from launch.
   final String? customerReference;
 
-  /// Merchant unique payment id echoed from launch.
+  /// Merchant unique payment ID echoed from launch.
   final String? merchantUniquePaymentId;
 
   /// Merchant code echoed from launch.
@@ -222,13 +177,16 @@ final class ZpCallbackVerified extends ZpCallbackResult {
   /// Additional merchant reference echoed from launch.
   final String? additionalReference;
 
+  /// Card category label. Payment/preauthorization only.
+  final String? cardCategory;
+
   /// Pre-fee base amount.
   final num? baseAmount;
 
   /// Fee charged to the customer.
   final num? customerFee;
 
-  /// Processor-side reference for this transaction.
+  /// Processor-side transaction reference.
   final String? processorReference;
 
   /// Date the transaction was processed.
@@ -240,11 +198,7 @@ final class ZpCallbackVerified extends ZpCallbackResult {
   /// Human-readable transaction source label.
   final String? transactionSourceString;
 
-  // Payment-only (mode 0/2).
-
-  /// Human-readable label for [statusCode] (`paymentStatusString` /
-  /// `preauthStatusString` on the wire — unified here, matching how
-  /// [statusCode] itself already unifies `paymentStatus`/`preauthStatus`).
+  /// Human-readable payment or preauthorization status.
   final String? statusLabel;
 
   /// Funds settled to the merchant.
@@ -259,19 +213,32 @@ final class ZpCallbackVerified extends ZpCallbackResult {
   /// Amount actually processed.
   final num? processedAmount;
 
-  /// PayTo-specific status, when the payment method was PayTo.
+  /// PayTo-specific status.
   final String? payToStatus;
 
-  /// Product SKU 1, echoed from launch.
+  /// Product SKU 1.
   final String? sku1;
 
-  /// Product SKU 2, echoed from launch.
+  /// Product SKU 2.
   final String? sku2;
 
-  /// Acquirer auth-trace numbers (authCode/rrn/stan).
+  /// Acquirer authorization trace data.
   final ZpCallbackAdditionalData? additionalData;
 
-  // Preauth-only (mode 3).
+  /// Reusable saved-card or account token.
+  final String? token;
+
+  /// Whether [token] was saved.
+  final bool? cardInformationSaved;
+
+  /// Numeric card scheme code.
+  final num? cardTypeValue;
+
+  /// Card scheme label.
+  final String? cardTypeString;
+
+  /// Card sub-type label. Payment/preauthorization only.
+  final String? subCardTypeString;
 
   /// Held preauthorization amount.
   final num? preauthAmount;
@@ -279,289 +246,381 @@ final class ZpCallbackVerified extends ZpCallbackResult {
   /// When the preauthorization hold expires.
   final String? preauthExpiryAt;
 
-  // Tokenise-only (mode 1).
-
-  /// Fee breakdown for the tokenise attempt.
+  /// Tokenisation fee breakdown.
   final ZpTokenisePaymentDetail? paymentDetail;
 
   /// Whether the caller should redirect after tokenisation.
   final bool? doRedirect;
+
+  /// Card type label. Tokenisation only.
+  final String? cardType;
+
+  /// Whether the card is restricted. Tokenisation only.
+  final bool? isRestrictedCard;
 }
 
-/// The callback body does not match the expected shape for [mode] — a
-/// client/network problem, not a security rejection. Callers typically
-/// answer HTTP 400.
+/// The callback body does not match the expected shape for its mode.
 final class ZpCallbackMalformed extends ZpCallbackResult {
-  /// Creates a malformed callback result with an explanatory message.
+  /// Creates a malformed callback result.
   const ZpCallbackMalformed(this.message);
 
-  /// Human-readable explanation of why the callback was malformed.
+  /// Why the callback was malformed.
   final String message;
 }
 
-/// The body was shaped correctly but failed verification — a wrong hash,
-/// or a reference/mupid that does not match the launched attempt. Callers
-/// typically answer HTTP 401.
+/// The callback was shaped correctly but failed authenticity verification.
 final class ZpCallbackRejected extends ZpCallbackResult {
-  /// Creates a rejected callback result with an explanatory message.
+  /// Creates a rejected callback result.
   const ZpCallbackRejected(this.message);
 
-  /// Human-readable explanation of why the callback was rejected.
+  /// Why the callback was rejected.
   final String message;
+}
+
+typedef _CallbackShape = ({
+  Map<String, Object?> response,
+  String reference,
+  String validationCode,
+});
+
+Map<String, Object?>? _asObjectMap(Object? value) {
+  if (value is Map<String, Object?>) return value;
+  if (value is! Map) return null;
+
+  final result = <String, Object?>{};
+
+  for (final MapEntry(:key, :value) in value.entries) {
+    if (key is! String) return null;
+    result[key] = value;
+  }
+
+  return result;
+}
+
+String? _string(
+  Map<String, Object?> data,
+  String key, {
+  String path = 'response',
+}) => switch (data[key]) {
+  null => null,
+  final String value => value,
+  _ => throw FormatException('$path.$key must be a string'),
+};
+
+num? _number(
+  Map<String, Object?> data,
+  String key, {
+  String path = 'response',
+}) => switch (data[key]) {
+  null => null,
+  final num value => value,
+  _ => throw FormatException('$path.$key must be a number'),
+};
+
+bool? _boolean(
+  Map<String, Object?> data,
+  String key, {
+  String path = 'response',
+}) => switch (data[key]) {
+  null => null,
+  final bool value => value,
+  _ => throw FormatException('$path.$key must be a boolean'),
+};
+
+Map<String, Object?>? _object(
+  Map<String, Object?> data,
+  String key, {
+  String path = 'response',
+}) {
+  final value = data[key];
+
+  if (value == null) return null;
+
+  return _asObjectMap(value) ??
+      (throw FormatException('$path.$key must be an object'));
+}
+
+_CallbackShape _parseCallbackShape(
+  ZpPluginMode mode,
+  Map<String, Object?> body,
+) {
+  final response = _asObjectMap(body['response']);
+  final validationCode = body['validationCode'];
+
+  if (response == null || validationCode is! String) {
+    throw const FormatException(_errMalformedBody);
+  }
+
+  final referenceField = mode.callbackReferenceField;
+  final reference = response[referenceField];
+
+  if (reference is! String || reference.trim().isEmpty) {
+    throw FormatException('response.$referenceField must not be empty');
+  }
+
+  if (!_validationCodePattern.hasMatch(validationCode)) {
+    throw const FormatException(_errValidationCodeHex);
+  }
+
+  return (
+    response: response,
+    reference: reference,
+    validationCode: validationCode,
+  );
 }
 
 (ZpCents?, ZpCallbackRejected?) _validateCallbackContext(
   ZpPluginMode mode,
   ZpVerifyCallbackContext context,
 ) {
-  if (context.apiKey.length < _minCredentialLength ||
-      context.username.length < _minCredentialLength ||
-      context.password.length < _minCredentialLength ||
-      context.merchantUniquePaymentId.value.length < _minCredentialLength) {
+  if (context.apiKey.length < zpMinCredentialLength ||
+      context.username.length < zpMinCredentialLength ||
+      context.password.length < zpMinCredentialLength ||
+      context.merchantUniquePaymentId.value.length < zpMinCredentialLength) {
     return (null, const ZpCallbackRejected(_errCredentialLength));
   }
 
-  final numericAmount = num.tryParse(context.paymentAmount.toString().trim());
-  if (numericAmount == null) {
-    return (null, const ZpCallbackRejected(_errPaymentAmountNumber));
-  }
-  if (mode.requiresPositiveAmount && numericAmount <= 0) {
-    return (null, const ZpCallbackRejected(_errPaymentAmountPositive));
+  final (amount, failureReason) = resolveZpHashAmountChecked(
+    mode,
+    context.paymentAmount,
+  );
+
+  if (failureReason == null) {
+    return (amount, null);
   }
 
-  final amountField = resolveZpHashAmountField(mode, context.paymentAmount);
-  if (amountField == null) {
-    return (null, const ZpCallbackRejected(_errPaymentAmountInvalid));
-  }
-
-  return (amountField, null);
+  return (
+    null,
+    switch (failureReason) {
+      ZpAmountFailureReason.notANumber => const ZpCallbackRejected(
+        zpErrPaymentAmountNumber,
+      ),
+      ZpAmountFailureReason.notPositive => const ZpCallbackRejected(
+        zpErrPaymentAmountPositive,
+      ),
+      ZpAmountFailureReason.unresolvable => const ZpCallbackRejected(
+        _errPaymentAmountInvalid,
+      ),
+    },
+  );
 }
 
 bool _verifyCallbackHash({
   required ZpPluginMode mode,
   required ZpVerifyCallbackContext context,
-  required ZpCents amountField,
+  required ZpCents amount,
   required String reference,
   required String validationCode,
 }) {
-  final pipe = [
+  final value = [
     context.apiKey,
     context.username,
     context.password,
     mode.wireValue.toString(),
-    amountField.value,
+    amount.value,
     context.merchantUniquePaymentId.value,
     reference,
-  ].join(_pipeDelimiter);
+  ].join(zpPipeDelimiter);
 
-  return constantTimeHexEqual(createSha3_512(pipe), validationCode);
+  return constantTimeHexEqual(createSha3_512(value), validationCode);
 }
 
-typedef _CallbackShape = ({
-  Map<String, Object?>? response,
-  String? reference,
-  String? validationCode,
-  ZpCallbackMalformed? failure,
-});
+ZpCallbackAdditionalData? _additionalData(Map<String, Object?> response) {
+  final data = _object(response, 'additionalData');
 
-_CallbackShape _extractCallbackShape(
-  ZpPluginMode mode,
-  Map<String, Object?> body,
-) {
-  if (body case {
-    _fieldResponse: final Map<String, Object?> response,
-    _fieldValidationCode: final String validationCode,
-  }) {
-    final referenceField = mode.callbackReferenceField;
-    final reference = response[referenceField];
-    if (reference is! String || reference.trim().isEmpty) {
-      return (
-        response: null,
-        reference: null,
-        validationCode: null,
-        failure: ZpCallbackMalformed(
-          'response.$referenceField must not be empty',
-        ),
-      );
-    }
+  if (data == null) return null;
 
-    if (!_validationCodePattern.hasMatch(validationCode)) {
-      return (
-        response: null,
-        reference: null,
-        validationCode: null,
-        failure: const ZpCallbackMalformed(_errValidationCodeHex),
-      );
-    }
-
-    return (
-      response: response,
-      reference: reference,
-      validationCode: validationCode,
-      failure: null,
-    );
-  }
-  return (
-    response: null,
-    reference: null,
-    validationCode: null,
-    failure: const ZpCallbackMalformed(_errMalformedBody),
-  );
-}
-
-/// Validates that [body] has the shape a callback for [mode] must have — a
-/// `response` object with a non-empty mode-specific reference field, and a
-/// 128-character hex `validationCode` — without checking authenticity. The
-/// standalone-callable counterpart of the shape checks [verifyZpCallback]
-/// runs internally. Equivalent to `ZpPaymentCallbackBodySchema` /
-/// `ZpPreauthCallbackBodySchema` / `ZpTokeniseCallbackBodySchema` on the
-/// TypeScript side — one schema per mode there; parameterized by [mode]
-/// here, matching [verifyZpCallback]'s own shape. Returns `null` when
-/// [body] is well-shaped for [mode].
-ZpCallbackMalformed? validateZpCallbackBody(
-  ZpPluginMode mode,
-  Map<String, Object?> body,
-) => _extractCallbackShape(mode, body).failure;
-
-ZpCallbackAdditionalData? _extractAdditionalData(
-  Map<String, Object?> response,
-) {
-  final raw = response[_fieldAdditionalData];
-  if (raw is! Map<String, Object?>) return null;
   return ZpCallbackAdditionalData(
-    authCode: raw[_fieldAuthCode] as String?,
-    rrn: raw[_fieldRrn] as String?,
-    stan: raw[_fieldStan] as String?,
+    authCode: _string(data, 'authCode', path: 'response.additionalData'),
+    rrn: _string(data, 'rrn', path: 'response.additionalData'),
+    stan: _string(data, 'stan', path: 'response.additionalData'),
   );
 }
 
-ZpTokenisePaymentDetail? _extractPaymentDetail(Map<String, Object?> response) {
-  final raw = response[_fieldPaymentDetail];
-  if (raw is! Map<String, Object?>) return null;
+ZpTokenisePaymentDetail? _paymentDetail(Map<String, Object?> response) {
+  final data = _object(response, 'paymentDetail');
+
+  if (data == null) return null;
+
   return ZpTokenisePaymentDetail(
-    customerFee: raw[_fieldCustomerFee] as num?,
-    merchantFee: raw[_fieldMerchantFee] as num?,
-    processingAmount: raw[_fieldProcessingAmount] as num?,
-    paymentAmount: raw[_fieldPaymentAmount] as num?,
+    customerFee: _number(data, 'customerFee', path: 'response.paymentDetail'),
+    merchantFee: _number(data, 'merchantFee', path: 'response.paymentDetail'),
+    processingAmount: _number(
+      data,
+      'processingAmount',
+      path: 'response.paymentDetail',
+    ),
+    paymentAmount: _number(
+      data,
+      'paymentAmount',
+      path: 'response.paymentDetail',
+    ),
   );
 }
 
-/// Builds the verified result, populating only the business fields that
-/// apply to [mode] — tokenise (1) never carries the shared payment/preauth
-/// fields, and preauth (3) never carries the payment-only ones.
-ZpCallbackVerified _buildVerified(
+int _statusCode(ZpPluginMode mode, Map<String, Object?> response) {
+  if (mode == ZpPluginMode.tokenise) {
+    return ZpPaymentStatus.successful.wireValue;
+  }
+
+  final field = mode == ZpPluginMode.preauthorization
+      ? 'preauthStatus'
+      : 'paymentStatus';
+
+  return switch (response[field]) {
+    null => ZpPaymentStatus.pending.wireValue,
+    final num value => value.toInt(),
+    _ => throw FormatException('response.$field must be a number'),
+  };
+}
+
+ZpCallbackVerified _buildTokeniseResult(
+  String reference,
+  int statusCode,
+  Map<String, Object?> response,
+) => ZpCallbackVerified(
+  reference: reference,
+  statusCode: statusCode,
+  failureCode: _string(response, 'failureCode'),
+  failureReason: _string(response, 'failureReason'),
+  cardType: _string(response, 'cardType'),
+  isRestrictedCard: _boolean(response, 'isRestrictedCard'),
+  cardTypeValue: _number(response, 'cardTypeValue'),
+  cardTypeString: _string(response, 'cardTypeString'),
+  paymentDetail: _paymentDetail(response),
+  doRedirect: _boolean(response, 'doRedirect'),
+);
+
+ZpCallbackVerified _buildPaymentOrPreauthResult(
   ZpPluginMode mode,
   String reference,
   int statusCode,
   Map<String, Object?> response,
 ) {
-  final failureCode = response[_fieldFailureCode] as String?;
-  final failureReason = response[_fieldFailureReason] as String?;
-
-  if (mode == ZpPluginMode.tokenise) {
-    return ZpCallbackVerified(
-      reference: reference,
-      statusCode: statusCode,
-      failureCode: failureCode,
-      failureReason: failureReason,
-      paymentDetail: _extractPaymentDetail(response),
-      doRedirect: response[_fieldDoRedirect] as bool?,
-    );
-  }
-
   final isPreauth = mode == ZpPluginMode.preauthorization;
+
   return ZpCallbackVerified(
     reference: reference,
     statusCode: statusCode,
-    failureCode: failureCode,
-    failureReason: failureReason,
-    customerReference: response[_fieldCustomerReference] as String?,
-    merchantUniquePaymentId: response[_fieldMerchantUniquePaymentId] as String?,
-    merchantCode: response[_fieldMerchantCode] as String?,
-    additionalReference: response[_fieldAdditionalReference] as String?,
-    baseAmount: response[_fieldBaseAmount] as num?,
-    customerFee: response[_fieldCustomerFee] as num?,
-    processorReference: response[_fieldProcessorReference] as String?,
-    processingDate: response[_fieldProcessingDate] as String?,
-    transactionSource: response[_fieldTransactionSource] as num?,
-    transactionSourceString: response[_fieldTransactionSourceString] as String?,
-    statusLabel: isPreauth
-        ? response[_fieldPreauthStatusString] as String?
-        : response[_fieldPaymentStatusString] as String?,
-    fundsToMerchant: isPreauth ? null : response[_fieldFundsToMerchant] as num?,
-    settlementDate: isPreauth
-        ? null
-        : response[_fieldSettlementDate] as String?,
+    failureCode: _string(response, 'failureCode'),
+    failureReason: _string(response, 'failureReason'),
+    customerName: _string(response, 'customerName'),
+    customerReference: _string(response, 'customerReference'),
+    merchantUniquePaymentId: _string(response, 'merchantUniquePaymentId'),
+    merchantCode: _string(response, 'merchantCode'),
+    additionalReference: _string(response, 'additionalReference'),
+    cardCategory: _string(response, 'cardCategory'),
+    baseAmount: _number(response, 'baseAmount'),
+    customerFee: _number(response, 'customerFee'),
+    processorReference: _string(response, 'processorReference'),
+    processingDate: _string(response, 'processingDate'),
+    transactionSource: _number(response, 'transactionSource'),
+    transactionSourceString: _string(response, 'transactionSourceString'),
+    cardTypeValue: _number(response, 'cardTypeValue'),
+    cardTypeString: _string(response, 'cardTypeString'),
+    subCardTypeString: _string(response, 'subCardTypeString'),
+    statusLabel: _string(
+      response,
+      isPreauth ? 'preauthStatusString' : 'paymentStatusString',
+    ),
+    fundsToMerchant: isPreauth ? null : _number(response, 'fundsToMerchant'),
+    settlementDate: isPreauth ? null : _string(response, 'settlementDate'),
     isPaymentSettledToMerchant: isPreauth
         ? null
-        : response[_fieldIsPaymentSettledToMerchant] as bool?,
-    processedAmount: isPreauth ? null : response[_fieldProcessedAmount] as num?,
-    payToStatus: isPreauth ? null : response[_fieldPayToStatus] as String?,
-    sku1: isPreauth ? null : response[_fieldSku1] as String?,
-    sku2: isPreauth ? null : response[_fieldSku2] as String?,
-    additionalData: isPreauth ? null : _extractAdditionalData(response),
-    preauthAmount: isPreauth ? response[_fieldPreauthAmount] as num? : null,
-    preauthExpiryAt: isPreauth
-        ? response[_fieldPreauthExpiryAt] as String?
-        : null,
+        : _boolean(response, 'isPaymentSettledToMerchant'),
+    processedAmount: isPreauth ? null : _number(response, 'processedAmount'),
+    payToStatus: isPreauth ? null : _string(response, 'payToStatus'),
+    sku1: isPreauth ? null : _string(response, 'sku1'),
+    sku2: isPreauth ? null : _string(response, 'sku2'),
+    additionalData: isPreauth ? null : _additionalData(response),
+    token: isPreauth ? null : _string(response, 'token'),
+    cardInformationSaved: isPreauth
+        ? null
+        : _boolean(response, 'cardInformationSaved'),
+    preauthAmount: isPreauth ? _number(response, 'preauthAmount') : null,
+    preauthExpiryAt: isPreauth ? _string(response, 'preauthExpiryAt') : null,
   );
 }
 
-int _extractStatusCode(ZpPluginMode mode, Map<String, Object?> response) {
-  final statusField = switch (mode) {
-    ZpPluginMode.makePayment ||
-    ZpPluginMode.customPayment => _fieldPaymentStatus,
-    ZpPluginMode.preauthorization => _fieldPreauthStatus,
-    ZpPluginMode.tokenise => null,
-  };
+ZpCallbackVerified _buildVerifiedResult(
+  ZpPluginMode mode,
+  String reference,
+  int statusCode,
+  Map<String, Object?> response,
+) => mode == ZpPluginMode.tokenise
+    ? _buildTokeniseResult(reference, statusCode, response)
+    : _buildPaymentOrPreauthResult(mode, reference, statusCode, response);
 
-  return statusField == null
-      ? ZpPaymentStatus.successful.wireValue
-      : (response[statusField] as num?)?.toInt() ??
-            ZpPaymentStatus.pending.wireValue;
+/// Validates the callback body's structural shape for [mode].
+///
+/// The body must contain a `response` object, a non-empty mode-specific
+/// reference, and a 128-character hexadecimal `validationCode`.
+///
+/// Returns `null` when [body] is structurally valid. This does not verify
+/// callback authenticity.
+ZpCallbackMalformed? validateZpCallbackBody(
+  ZpPluginMode mode,
+  Map<String, Object?> body,
+) {
+  try {
+    _parseCallbackShape(mode, body);
+    return null;
+  } on FormatException catch (error) {
+    return ZpCallbackMalformed(error.message.toString());
+  }
 }
 
-/// Verifies the authenticity of an incoming HCP callback — payment (mode
-/// 0/2), preauth (mode 3), or tokenise (mode 1) — by recomputing the
-/// SHA3-512 hash and comparing it (constant-time) to `body.validationCode`.
+/// Verifies the authenticity of an incoming HCP callback.
 ///
-/// Recover [mode] from your own launch state — never sniff it from [body].
-/// Never throws.
+/// Supports payment (mode 0/2), preauthorization (mode 3), and tokenisation
+/// (mode 1) callbacks by recomputing the SHA3-512 validation hash and
+/// comparing it in constant time with `body.validationCode`.
+///
+/// Recover [mode] from your own launch state. Never infer it from [body].
+///
+/// Never throws for malformed callback data.
 ZpCallbackResult verifyZpCallback(
   ZpPluginMode mode,
   Map<String, Object?> body,
   ZpVerifyCallbackContext context,
 ) {
-  final shape = _extractCallbackShape(mode, body);
-  if (shape.failure != null) return shape.failure!;
-  final response = shape.response!;
-  final reference = shape.reference!;
-  final validationCode = shape.validationCode!;
+  try {
+    final (:response, :reference, :validationCode) = _parseCallbackShape(
+      mode,
+      body,
+    );
 
-  final (amountField, contextError) = _validateCallbackContext(mode, context);
-  if (contextError != null) return contextError;
+    final (amount, contextError) = _validateCallbackContext(mode, context);
 
-  if (!_verifyCallbackHash(
-    mode: mode,
-    context: context,
-    amountField: amountField!,
-    reference: reference,
-    validationCode: validationCode,
-  )) {
-    return const ZpCallbackRejected(_errValidationCodeMismatch);
-  }
+    if (contextError != null) {
+      return contextError;
+    }
 
-  // The hash proves the callback is authentic for *some* attempt with this
-  // mupid; this catches a callback body whose own echoed id disagrees with
-  // it (relevant for modes 0/2, which carry it in the response).
-  if (response case {_fieldMerchantUniquePaymentId: final String echoedMupid}) {
-    if (echoedMupid.isNotEmpty &&
+    if (!_verifyCallbackHash(
+      mode: mode,
+      context: context,
+      amount: amount!,
+      reference: reference,
+      validationCode: validationCode,
+    )) {
+      return const ZpCallbackRejected(_errValidationCodeMismatch);
+    }
+
+    final echoedMupid = _string(response, 'merchantUniquePaymentId');
+
+    if (echoedMupid != null &&
+        echoedMupid.isNotEmpty &&
         echoedMupid != context.merchantUniquePaymentId.value) {
       return const ZpCallbackRejected(_errMupidMismatch);
     }
+
+    return _buildVerifiedResult(
+      mode,
+      reference,
+      _statusCode(mode, response),
+      response,
+    );
+  } on FormatException catch (error) {
+    return ZpCallbackMalformed(error.message.toString());
   }
-
-  final statusCode = _extractStatusCode(mode, response);
-
-  return _buildVerified(mode, reference, statusCode, response);
 }

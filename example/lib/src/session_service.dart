@@ -1,10 +1,12 @@
-/// Checkout session creation: idempotency, HCP Authorise launch-URL
-/// construction, and the app-facing response shape.
+/// Checkout session creation and Hosted Payment Page (HCP) URL generation.
 ///
-/// The launch URL is built here with `package:zenpay_hcp` — the same
-/// `createZpFingerprint` → `ZpCheckoutUrlRequest` → validate → URL sequence a
-/// TypeScript integrator runs with `@ianmenethil/zp-hcp/server`, minus the
-/// browser plugin. There is no outbound call to ZenPay at launch time.
+/// Orchestrates the checkout initiation lifecycle:
+/// - Enforces request idempotency via [createSession] and [AttemptStore].
+/// - Calculates cryptographic SHA3-512 payment fingerprints via `package:zenpay_dart`.
+/// - Assembles the authoritative `ZpCheckoutUrlRequest` with appropriate feature
+///   flags, return URLs, and callback destinations.
+/// - Validates generated launch URLs against HTTPS scheme requirements and host allowlists.
+/// - Does not make outbound network calls at launch time; launch URLs are computed locally.
 library;
 
 import 'package:zenpay_dart/zenpay_dart.dart';
@@ -12,26 +14,27 @@ import 'package:zenpay_dart/zenpay_dart.dart';
 import 'checkout_state.dart';
 import 'config.dart';
 
-/// Path prefix for the `/api/v1/sessions/:merchantUniquePaymentId` status-lookup route.
 const sessionsPathPrefix = '/api/v1/sessions/';
-
-/// Path for the `/return` route.
 const returnPath = '/return';
-
-/// Path for the `/api/v1/callbacks` route.
 const callbacksPath = '/api/v1/callbacks';
 
-/// Extracts the payment id segment from a `/api/v1/sessions/:merchantUniquePaymentId` path.
+/// Extracts the payment identifier segment from a `/api/v1/sessions/:merchantUniquePaymentId` [pathname].
 String merchantUniquePaymentIdFromPath(String pathname) =>
     pathname.substring(sessionsPathPrefix.length);
 
-/// The App Link (mobile) or web origin (web/webFrame) ZenPay's return broker
-/// redirects to once the browser returns.
+/// Computes the destination return URI for an [attempt] based on its client presentation kind.
+///
+/// Returns an Android App Link / Universal Link URI for [CheckoutClient.mobile], or
+/// the configured web origin [config.appReturnUriWeb] for [CheckoutClient.web] and
+/// [CheckoutClient.webFrame].
 Uri appReturnUriFor(CheckoutAttempt attempt, AppConfig config) =>
     attempt.client == CheckoutClient.mobile
     ? config.publicBaseUrl.resolve('/zenpay/app-return')
     : config.appReturnUriWeb;
 
+/// Verifies that a replayed idempotency request matches the original [existing] attempt's parameters.
+///
+/// Throws [HttpError] `(409, 'IDEMPOTENCY_KEY_REUSED')` if any core order parameter differs.
 void _requireIdempotentMatch(
   CheckoutAttempt existing,
   CreateCheckoutBody body,
@@ -46,6 +49,7 @@ void _requireIdempotentMatch(
   }
 }
 
+/// Converts a stored [attempt] record into an [AppCheckoutSession] DTO.
 AppCheckoutSession _toAppCheckoutSession(CheckoutAttempt attempt) {
   final checkoutUrl = attempt.checkoutUrl;
   if (checkoutUrl == null) {
@@ -59,24 +63,21 @@ AppCheckoutSession _toAppCheckoutSession(CheckoutAttempt attempt) {
   );
 }
 
-/// ZenPay recomputes the fingerprint from what the launch URL actually
-/// carries, so the amount hashed here must be the amount sent there. Modes
-/// that carry no `paymentAmount` must therefore hash `0`, not the amount the
-/// merchant app happened to quote.
+/// Determines the amount value to hash into the SHA3-512 fingerprint for [body] and [mode].
+///
+/// ZenPay recalculates fingerprints from the launch URL parameters. Modes that carry
+/// no payment amount (such as Tokenise without payment) hash `0` rather than the
+/// quoted payment amount.
 num _fingerprintAmount(CreateCheckoutBody body, int mode) =>
     _isPaymentLike(mode) ? body.paymentAmount : 0;
 
+/// Returns `true` if the specified [mode] represents a payment-carrying transaction (modes 0, 2, 3).
 bool _isPaymentLike(int mode) => mode == 0 || mode == 2 || mode == 3;
 
-/// Callback-URL token lifetime: generous enough for a slow ZenPay callback,
-/// short enough not to matter if one leaks.
 const _callbackTokenTtl = Duration(hours: 24);
 
-/// The callback URL for one attempt: the fixed `/api/v1/callbacks` route,
-/// with an optional signed `?t=<token>` binding it to this specific
-/// mode/mupid/timestamp/amount when [AppConfig.callbackTokenSecretConfigured]
-/// — verified on receipt by `security.dart`'s `checkCallbackToken`. Absent
-/// a configured secret, this is just the bare route, unchanged from before.
+/// Constructs the callback URL for an attempt, appending a signed `?t=<token>` parameter
+/// when [AppConfig.callbackTokenSecretConfigured] is enabled.
 String _callbackUrlFor({
   required String merchantUniquePaymentId,
   required String timestamp,
@@ -100,6 +101,7 @@ String _callbackUrlFor({
   return base.replace(queryParameters: {'t': token}).toString();
 }
 
+/// Assembles the complete [ZpCheckoutUrlRequest] configuration.
 ZpCheckoutUrlRequest _buildAuthoriseRequest({
   required String fingerprint,
   required String merchantUniquePaymentId,
@@ -160,9 +162,7 @@ ZpCheckoutUrlRequest _buildAuthoriseRequest({
   );
 }
 
-/// Builds and validates the HCP launch URL for one attempt.
-///
-/// Fingerprint first, then the Authorise payload carrying it, then the URL
+/// Builds and validates the HCP launch URL for a single checkout attempt.
 Uri _buildCheckoutUrl({
   required String merchantUniquePaymentId,
   required String timestamp,
@@ -202,12 +202,13 @@ Uri _buildCheckoutUrl({
   return resolveCheckoutUrl(result.url, config);
 }
 
-/// Creates (or replays, by idempotency key) a ZenPay checkout session for
-/// [body], returning the launch data the merchant app needs.
+/// Creates a new checkout session or replays an existing session by [idempotencyKey].
 ///
-/// A replay returns the stored URL rather than rebuilding it: the fingerprint
-/// covers the timestamp, so a rebuild would produce a different URL for the
-/// same attempt.
+/// Returns an [AppCheckoutSession] containing the unique payment identifier and
+/// the validated ZenPay Hosted Payment Page launch URL.
+///
+/// Replayed requests return the pre-existing checkout URL to preserve the original
+/// cryptographic timestamp signature.
 AppCheckoutSession createSession(
   CreateCheckoutBody body,
   String idempotencyKey,
@@ -264,27 +265,23 @@ AppCheckoutSession createSession(
   return _toAppCheckoutSession(updated);
 }
 
-/// Thrown when a checkout URL cannot be built, or resolves somewhere the
-/// allowlist does not permit.
-///
-/// [detail], when present, carries the specific reason (e.g. schema
-/// validation errors) for logging — never sent to the client, which only
-/// gets [code].
+/// Thrown when checkout session URL generation fails or violates security allowlists.
 class ZenPaySessionException implements Exception {
   ZenPaySessionException(this.code, {this.detail});
 
   final String code;
+
+  /// Optional internal diagnostic detail (used only for server logging, not sent to clients).
   final String? detail;
 
   @override
   String toString() => code;
 }
 
-/// Validates a launch URL: HTTPS scheme plus the configured host allowlist.
+/// Validates that a generated launch URL uses HTTPS and targets an allowed host domain.
 ///
-/// Applies to any URL bound for the app, whoever produced it — a
-/// misconfigured `ZENPAY_HPP_ENDPOINT_URL` fails here rather than sending the
-/// customer somewhere unintended.
+/// Throws [ZenPaySessionException] if scheme is not HTTPS or if the host is not
+/// present in [config.zenPay.allowedCheckoutHosts].
 Uri resolveCheckoutUrl(String endpointUrl, AppConfig config) {
   final checkoutUrl = Uri.parse(endpointUrl);
   if (checkoutUrl.scheme != 'https') {

@@ -97,8 +97,13 @@ void main() {
             'paymentReference': vector['reference'],
             'paymentStatus': 3,
             'paymentStatusString': 'Successful',
+            'customerName': 'Jane Doe',
             'customerReference': 'ORD-1001',
             'merchantCode': 'ZenTest1',
+            'cardCategory': 'Credit',
+            'cardTypeValue': 2,
+            'cardTypeString': 'Mastercard',
+            'subCardTypeString': 'Debit Mastercard',
             'sku1': 'SKU-A',
             'sku2': 'SKU-B',
             'fundsToMerchant': 49.9,
@@ -109,6 +114,10 @@ void main() {
               'rrn': 'RRN456',
               'stan': 'STAN789',
             },
+            // Set when the customer opted to save their card
+            // (allowSaveCardUserOption) on this same payment callback.
+            'token': 'CARD-TOKEN-ABC123',
+            'cardInformationSaved': true,
             // Card/account-shaped — must never appear on the result.
             'accountOrCardNo': '4111********1111',
             'paymentCard': 'VISA',
@@ -120,8 +129,13 @@ void main() {
         expect(result, isA<ZpCallbackVerified>());
         final verified = result as ZpCallbackVerified;
         expect(verified.statusLabel, 'Successful');
+        expect(verified.customerName, 'Jane Doe');
         expect(verified.customerReference, 'ORD-1001');
         expect(verified.merchantCode, 'ZenTest1');
+        expect(verified.cardCategory, 'Credit');
+        expect(verified.cardTypeValue, 2);
+        expect(verified.cardTypeString, 'Mastercard');
+        expect(verified.subCardTypeString, 'Debit Mastercard');
         expect(verified.sku1, 'SKU-A');
         expect(verified.sku2, 'SKU-B');
         expect(verified.fundsToMerchant, 49.9);
@@ -130,9 +144,13 @@ void main() {
         expect(verified.additionalData?.authCode, 'AUTH123');
         expect(verified.additionalData?.rrn, 'RRN456');
         expect(verified.additionalData?.stan, 'STAN789');
+        expect(verified.token, 'CARD-TOKEN-ABC123');
+        expect(verified.cardInformationSaved, isTrue);
         // Preauth/tokenise-only fields stay null for a payment callback.
         expect(verified.preauthAmount, isNull);
         expect(verified.paymentDetail, isNull);
+        expect(verified.cardType, isNull);
+        expect(verified.isRestrictedCard, isNull);
       });
 
       group('validateZpCallbackBody', () {

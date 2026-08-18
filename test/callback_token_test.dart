@@ -27,17 +27,20 @@ void main() {
         tokenVector['token'] as String,
         secret,
       );
-      expect(result.ok, isTrue);
       final decoded = tokenVector['decodedPayload'] as Map<String, Object?>;
-      expect(
-        result.payload!.mode,
-        ZpPluginMode.fromWireValue(decoded['mode'] as int),
-      );
-      expect(
-        result.payload!.merchantUniquePaymentId,
-        decoded['merchantUniquePaymentId'],
-      );
-      expect(result.payload!.timestamp, decoded['timestamp']);
+      if (result case ZpCallbackUrlTokenVerified(:final payload)) {
+        expect(
+          payload.mode,
+          ZpPluginMode.fromWireValue(decoded['mode'] as int),
+        );
+        expect(
+          payload.merchantUniquePaymentId,
+          decoded['merchantUniquePaymentId'],
+        );
+        expect(payload.timestamp, decoded['timestamp']);
+      } else {
+        fail('expected a verified token');
+      }
     },
   );
 
@@ -51,11 +54,14 @@ void main() {
     final token = createZpCallbackUrlToken(payload, secret);
     final result = verifyZpCallbackUrlToken(token, secret);
 
-    expect(result.ok, isTrue);
-    expect(result.payload!.mode, ZpPluginMode.tokenise);
-    expect(result.payload!.merchantUniquePaymentId, 'mupid-0002');
-    expect(result.payload!.timestamp, '2026-02-01T09:00:00');
-    expect(result.payload!.extra['orderId'], 'ORD-42');
+    if (result case ZpCallbackUrlTokenVerified(:final payload)) {
+      expect(payload.mode, ZpPluginMode.tokenise);
+      expect(payload.merchantUniquePaymentId, 'mupid-0002');
+      expect(payload.timestamp, '2026-02-01T09:00:00');
+      expect(payload.extra['orderId'], 'ORD-42');
+    } else {
+      fail('expected a verified token');
+    }
   });
 
   test('round-trips an optional paymentAmount', () {
@@ -67,7 +73,11 @@ void main() {
     );
     final token = createZpCallbackUrlToken(payload, secret);
     final result = verifyZpCallbackUrlToken(token, secret);
-    expect(result.payload!.paymentAmount, '49.90');
+    if (result case ZpCallbackUrlTokenVerified(:final payload)) {
+      expect(payload.paymentAmount, '49.90');
+    } else {
+      fail('expected a verified token');
+    }
   });
 
   test('rejects a token verified with the wrong secret', () {
@@ -78,8 +88,11 @@ void main() {
     );
     final token = createZpCallbackUrlToken(payload, secret);
     final result = verifyZpCallbackUrlToken(token, 'b'.padLeft(32, 'b'));
-    expect(result.ok, isFalse);
-    expect(result.reason, ZpCallbackUrlTokenFailureReason.badSignature);
+    if (result case ZpCallbackUrlTokenFailure(:final reason)) {
+      expect(reason, ZpCallbackUrlTokenFailureReason.badSignature);
+    } else {
+      fail('expected a failed verification');
+    }
   });
 
   test('rejects a token with a single flipped signature character', () {
@@ -93,14 +106,20 @@ void main() {
         token.substring(0, token.length - 1) +
         (token[token.length - 1] == 'A' ? 'B' : 'A');
     final result = verifyZpCallbackUrlToken(flipped, secret);
-    expect(result.ok, isFalse);
-    expect(result.reason, ZpCallbackUrlTokenFailureReason.badSignature);
+    if (result case ZpCallbackUrlTokenFailure(:final reason)) {
+      expect(reason, ZpCallbackUrlTokenFailureReason.badSignature);
+    } else {
+      fail('expected a failed verification');
+    }
   });
 
   test('rejects a malformed (too-short) token', () {
     final result = verifyZpCallbackUrlToken('short', secret);
-    expect(result.ok, isFalse);
-    expect(result.reason, ZpCallbackUrlTokenFailureReason.malformed);
+    if (result case ZpCallbackUrlTokenFailure(:final reason)) {
+      expect(reason, ZpCallbackUrlTokenFailureReason.malformed);
+    } else {
+      fail('expected a failed verification');
+    }
   });
 
   test('rejects an expired token', () {
@@ -115,8 +134,11 @@ void main() {
       const ZpCallbackUrlTokenOptions(expiresInSeconds: -1),
     );
     final result = verifyZpCallbackUrlToken(token, secret);
-    expect(result.ok, isFalse);
-    expect(result.reason, ZpCallbackUrlTokenFailureReason.expired);
+    if (result case ZpCallbackUrlTokenFailure(:final reason)) {
+      expect(reason, ZpCallbackUrlTokenFailureReason.expired);
+    } else {
+      fail('expected a failed verification');
+    }
   });
 
   test('a token with no expiresInSeconds never expires', () {
@@ -126,7 +148,10 @@ void main() {
       timestamp: '2026-02-01T09:00:00',
     );
     final token = createZpCallbackUrlToken(payload, secret);
-    expect(verifyZpCallbackUrlToken(token, secret).ok, isTrue);
+    expect(
+      verifyZpCallbackUrlToken(token, secret),
+      isA<ZpCallbackUrlTokenVerified>(),
+    );
   });
 
   test('throws RangeError for a secret shorter than 32 bytes', () {

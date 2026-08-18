@@ -10,9 +10,6 @@ library;
 import 'crypto.dart';
 import 'enums.dart';
 
-/// The HCP endpoint pattern ZenPay operates: `pay`/`payuat`/`pay.sandbox`
-/// on one of the known ZenPay-operated brand domains, `/Online/v4` or
-/// `/Online/v5`.
 final _hcpEndpointPattern = RegExp(
   r'^https://(pay|payuat|pay\.sandbox)\.'
   r'(travelpay|childcareeasypay|zenpay|b2bpay|schooleasypay'
@@ -22,81 +19,11 @@ final _hcpEndpointPattern = RegExp(
 
 final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
 
-const _authorisePath = 'Authorise';
-
-/// Query parameter keys on the Authorise URL.
-abstract final class _Param {
-  static const apiKey = '__ApiKey';
-  static const fingerprint = '__Fingerprint';
-  static const timestamp = 'timestamp';
-  static const merchantUniquePaymentId = 'merchantUniquePaymentId';
-  static const customerEmail = 'customerEmail';
-  static const mode = 'mode';
-  static const overrideFeePayer = 'overrideFeePayer';
-  static const userMode = 'userMode';
-  static const displayMode = 'displayMode';
-  static const hideHeader = 'hideHeader';
-  static const hideTermsAndConditions = 'hideTermsAndConditions';
-  static const showFeeOnTokenising = 'showFeeOnTokenising';
-  static const showFailedPaymentFeeOnTokenising =
-      'showFailedPaymentFeeOnTokenising';
-  static const sendConfirmationEmailToCustomer =
-      'sendConfirmationEmailToCustomer';
-  static const allowBankAcOneOffPayment = 'allowBankAcOneOffPayment';
-  static const allowPayIdOneOffPayment = 'allowPayIdOneOffPayment';
-  static const allowApplePayOneOffPayment = 'allowApplePayOneOffPayment';
-  static const allowUnionPayOneOffPayment = 'allowUnionPayOneOffPayment';
-  static const allowAliPayPlusOneOffPayment = 'allowAliPayPlusOneOffPayment';
-  static const isJsPlugin = 'isJsPlugin';
-  static const callbackUrl = 'callbackUrl';
-  static const redirectUrl = 'redirectUrl';
-  static const sendConfirmationEmailToMerchant =
-      'sendConfirmationEmailToMerchant';
-  static const allowPayToOneOffPayment = 'allowPayToOneOffPayment';
-  static const allowGooglePayOneOffPayment = 'allowGooglePayOneOffPayment';
-  static const allowLatitudePayOneOffPayment = 'allowLatitudePayOneOffPayment';
-  static const allowSlicePayOneOffPayment = 'allowSlicePayOneOffPayment';
-  static const allowWeChatPayOneOffPayment = 'allowWeChatPayOneOffPayment';
-  static const allowSaveCardUserOption = 'allowSaveCardUserOption';
-  static const hideMerchantLogo = 'hideMerchantLogo';
-  static const redirectOnError = 'redirectOnError';
-  static const customerName = 'customerName';
-  static const customerReference = 'customerReference';
-  static const paymentAmount = 'paymentAmount';
-  static const customerNameLabel = 'customerNameLabel';
-  static const customerReferenceLabel = 'customerReferenceLabel';
-  static const paymentAmountLabel = 'paymentAmountLabel';
-  static const title = 'title';
-  static const token = 'token';
-  static const abn = 'AustralianBusinessNumber';
-  static const sku1 = 'sku1';
-  static const sku2 = 'sku2';
-  static const additionalReference = 'additionalReference';
-  static const contactNumber = 'contactNumber';
-  static const departureDate = 'departureDate';
-  static const companyName = 'companyName';
-}
-
-/// Validation error messages.
-abstract final class _Err {
-  static const apiKeyFingerprintEmpty =
-      'apiKey and fingerprint must not be empty';
-  static const merchantCodeEmpty = 'merchantCode must not be empty';
-  static const callbackOrRedirectRequired =
-      'callbackUrl and redirectUrl cannot both be empty';
-  static const departureDateRequired =
-      'departureDate is required when allowSlicePayOneOffPayment is true';
-}
-
-/// The Authorise request: every field ZenPay's hosted-checkout endpoint
-/// accepts, minus browser-only concerns (theme, fonts, modal sizing,
-/// lifecycle callbacks) that have no meaning when a server builds the URL.
+/// The Authorise request: every field ZenPay's hosted-checkout endpoint accepts, minus browser-only concerns such as theme, fonts, modal sizing, and lifecycle callbacks.
 class ZpCheckoutUrlRequest {
-  /// Creates a checkout-URL request.
+  /// Creates a checkout URL request.
   ///
-  /// [displayMode] defaults to [ZpDisplayMode.redirectUrl] — the correct
-  /// value for a system-browser or redirect-based integration.
-  /// [ZpDisplayMode.modal] exists only because ZenPay's API accepts it.
+  /// [displayMode] defaults to [ZpDisplayMode.redirectUrl], which is suitable for system-browser or redirect-based integrations.
   const ZpCheckoutUrlRequest({
     required this.url,
     required this.apiKey,
@@ -147,23 +74,21 @@ class ZpCheckoutUrlRequest {
     this.companyName,
   });
 
-  /// The HCP Authorise endpoint, e.g.
+  /// The HCP Authorise endpoint, for example
   /// `https://pay.sandbox.travelpay.com.au/Online/v5`.
   final String url;
 
-  /// Merchant API key — sent as `__ApiKey`. Not a secret; safe in a launch
-  /// URL handed to a client.
+  /// Merchant API key sent as `__ApiKey`.
   final String apiKey;
 
-  /// Per-transaction SHA3-512 digest from [createZpFingerprint] — sent as
-  /// `__Fingerprint`. Not a secret; bound to one mode/amount/mupid/timestamp.
+  /// Per-transaction SHA3-512 digest from [createZpFingerprint], sent as
+  /// `__Fingerprint`.
   final String fingerprint;
 
-  /// Merchant API key (public merchant identifier).
+  /// Merchant identifier used in the Authorise URL path.
   final String merchantCode;
 
-  /// Must equal the timestamp used to compute [fingerprint], or ZenPay's
-  /// recomputed hash will not match.
+  /// Timestamp used when computing [fingerprint].
   final ZpTimestamp timestamp;
 
   /// Merchant Unique Payment Identifier.
@@ -172,12 +97,10 @@ class ZpCheckoutUrlRequest {
   /// Customer email address.
   final String customerEmail;
 
-  /// Server-to-server callback destination. At least one of [callbackUrl]
-  /// or [redirectUrl] is required.
+  /// Server-to-server callback destination.
   final String? callbackUrl;
 
-  /// Browser redirect destination after payment. At least one of
-  /// [callbackUrl] or [redirectUrl] is required.
+  /// Browser redirect destination after payment.
   final String? redirectUrl;
 
   /// Checkout plugin mode.
@@ -189,162 +112,171 @@ class ZpCheckoutUrlRequest {
   /// Target user mode.
   final ZpUserMode userMode;
 
-  /// Target display mode (modal or redirect).
+  /// Target display mode.
   final ZpDisplayMode displayMode;
 
-  /// Whether to hide the top header element.
+  /// Whether to hide the top header.
   final bool hideHeader;
 
   /// Whether to hide terms and conditions.
   final bool hideTermsAndConditions;
 
-  /// Whether to display fee during tokenisation.
+  /// Whether to display fees during tokenisation.
   final bool showFeeOnTokenising;
 
-  /// Whether to display failed payment fee during tokenisation.
+  /// Whether to display failed-payment fees during tokenisation.
   final bool showFailedPaymentFeeOnTokenising;
 
-  /// Whether to send payment confirmation email to the customer.
+  /// Whether to send payment confirmation to the customer.
   final bool sendConfirmationEmailToCustomer;
 
-  /// Whether to send payment confirmation email to the merchant.
+  /// Whether to send payment confirmation to the merchant.
   final bool? sendConfirmationEmailToMerchant;
 
-  /// Allow direct debit / bank account payment option.
+  /// Allow bank-account payment.
   final bool allowBankAcOneOffPayment;
 
-  /// Allow PayID payment option.
+  /// Allow PayID payment.
   final bool allowPayIdOneOffPayment;
 
-  /// Allow PayTo payment option.
+  /// Allow PayTo payment.
   final bool? allowPayToOneOffPayment;
 
-  /// Allow Apple Pay payment option.
+  /// Allow Apple Pay payment.
   final bool allowApplePayOneOffPayment;
 
-  /// Allow Google Pay payment option.
+  /// Allow Google Pay payment.
   final bool? allowGooglePayOneOffPayment;
 
-  /// Allow UnionPay payment option.
+  /// Allow UnionPay payment.
   final bool allowUnionPayOneOffPayment;
 
-  /// Allow Alipay+ payment option.
+  /// Allow Alipay+ payment.
   final bool allowAliPayPlusOneOffPayment;
 
-  /// Allow LatitudePay payment option.
+  /// Allow LatitudePay payment.
   final bool? allowLatitudePayOneOffPayment;
 
+  /// Allow Slice Pay payment.
+  ///
   /// Requires [departureDate] when `true`.
   final bool? allowSlicePayOneOffPayment;
 
-  /// Allow WeChat Pay payment option.
+  /// Allow WeChat Pay payment.
   final bool? allowWeChatPayOneOffPayment;
 
-  /// Allow customer option to save card for future use.
+  /// Allow the customer to save their card.
   final bool? allowSaveCardUserOption;
 
-  /// Hide merchant logo from header.
+  /// Whether to hide the merchant logo.
   final bool? hideMerchantLogo;
 
-  /// Redirect to return URL even on payment error.
+  /// Whether errors should redirect to the return URL.
   final bool? redirectOnError;
 
-  /// Required (with [customerReference]) for [ZpPluginMode.makePayment] and
-  /// [ZpPluginMode.customPayment].
+  /// Customer name.
+  ///
+  /// Required with [customerReference] for payment modes 0 and 2.
   final String? customerName;
 
-  /// Required (with [customerName]) for [ZpPluginMode.makePayment] and
-  /// [ZpPluginMode.customPayment].
+  /// Customer reference.
+  ///
+  /// Required with [customerName] for payment modes 0 and 2.
   final String? customerReference;
 
-  /// Dollars, string or number. Required and must be positive for
-  /// [ZpPluginMode.makePayment], [ZpPluginMode.customPayment] and
-  /// [ZpPluginMode.preauthorization].
+  /// Payment amount in dollars.
   final Object? paymentAmount;
 
-  /// Custom UI label for customer name field.
+  /// Custom customer-name field label.
   final String? customerNameLabel;
 
-  /// Custom UI label for customer reference field.
+  /// Custom customer-reference field label.
   final String? customerReferenceLabel;
 
-  /// Custom UI label for payment amount field.
+  /// Custom payment-amount field label.
   final String? paymentAmountLabel;
 
-  /// Custom page title.
+  /// Custom checkout page title.
   final String? title;
 
-  /// Sent as `token`.
+  /// Card proxy sent to ZenPay as `token`.
   final String? cardProxy;
 
-  /// Australian Business Number — sent as `AustralianBusinessNumber`.
+  /// Australian Business Number sent as `AustralianBusinessNumber`.
   final String? abn;
 
-  /// Product SKU 1 identifier.
+  /// Product SKU 1.
   final String? sku1;
 
-  /// Product SKU 2 identifier.
+  /// Product SKU 2.
   final String? sku2;
 
-  /// Additional merchant reference payload.
+  /// Additional merchant reference.
   final String? additionalReference;
 
-  /// Customer contact phone number.
+  /// Customer contact number.
   final String? contactNumber;
 
-  /// Required when [allowSlicePayOneOffPayment] is `true`.
+  /// Departure date required for Slice Pay.
   final String? departureDate;
 
-  /// Merchant company name.
+  /// Customer company name.
   final String? companyName;
 }
 
-/// Result of [createZpCheckoutUrl]: exhaustively pattern-match with a
-/// `switch` over [ZpCheckoutUrlSuccess] / [ZpCheckoutUrlFailure].
+/// Result of [createZpCheckoutUrl].
+///
+/// Exhaustively pattern-match with a `switch` over [ZpCheckoutUrlSuccess]
+/// and [ZpCheckoutUrlFailure].
 sealed class ZpCheckoutUrlResult {
   const ZpCheckoutUrlResult();
 }
 
 /// A successfully built checkout URL.
 final class ZpCheckoutUrlSuccess extends ZpCheckoutUrlResult {
-  /// Creates a successfully built checkout URL result.
+  /// Creates a successful checkout URL result.
   const ZpCheckoutUrlSuccess(this.url);
 
-  /// Fully assembled and percent-encoded checkout URL string.
+  /// Fully assembled and percent-encoded checkout URL.
   final String url;
 }
 
-/// A validation failure, with a human-readable [message].
+/// A checkout URL validation failure.
 final class ZpCheckoutUrlFailure extends ZpCheckoutUrlResult {
-  /// Creates a checkout URL failure result with an explanatory message.
+  /// Creates a checkout URL failure.
   const ZpCheckoutUrlFailure(this.message);
 
-  /// Human-readable explanation of why URL assembly failed.
+  /// Why URL construction failed.
   final String message;
 }
 
-/// Validates [request] without building a URL — the standalone-callable
-/// counterpart of the checks [createZpCheckoutUrl] runs internally before
-/// assembling a URL. Equivalent to `ZpAuthoriseRequestSchema` on the
-/// TypeScript side. Returns `null` when [request] is valid.
+/// Validates [request] without building the URL.
+///
+/// Returns `null` when [request] is valid.
 ZpCheckoutUrlFailure? validateZpCheckoutUrlRequest(
   ZpCheckoutUrlRequest request,
 ) {
   if (request.apiKey.isEmpty || request.fingerprint.isEmpty) {
-    return const ZpCheckoutUrlFailure(_Err.apiKeyFingerprintEmpty);
+    return const ZpCheckoutUrlFailure(
+      'apiKey and fingerprint must not be empty',
+    );
   }
+
   if (!_hcpEndpointPattern.hasMatch(request.url)) {
     return ZpCheckoutUrlFailure(
       'url "${request.url}" is not a recognized ZenPay HCP endpoint',
     );
   }
+
   if (request.merchantCode.isEmpty) {
-    return const ZpCheckoutUrlFailure(_Err.merchantCodeEmpty);
+    return const ZpCheckoutUrlFailure('merchantCode must not be empty');
   }
 
   if ((request.callbackUrl?.isEmpty ?? true) &&
       (request.redirectUrl?.isEmpty ?? true)) {
-    return const ZpCheckoutUrlFailure(_Err.callbackOrRedirectRequired);
+    return const ZpCheckoutUrlFailure(
+      'callbackUrl and redirectUrl cannot both be empty',
+    );
   }
 
   if (!_emailPattern.hasMatch(request.customerEmail)) {
@@ -353,125 +285,114 @@ ZpCheckoutUrlFailure? validateZpCheckoutUrlRequest(
     );
   }
 
-  final requiresCustomerFields =
+  final requiresCustomer =
       request.mode == ZpPluginMode.makePayment ||
       request.mode == ZpPluginMode.customPayment;
 
-  if (requiresCustomerFields &&
+  if (requiresCustomer &&
       ((request.customerName?.isEmpty ?? true) ||
           (request.customerReference?.isEmpty ?? true))) {
     return ZpCheckoutUrlFailure(
-      'customerName and customerReference are required for mode ${request.mode.wireValue}',
+      'customerName and customerReference are required '
+      'for mode ${request.mode.wireValue}',
     );
   }
 
   if (request.mode.requiresPositiveAmount) {
     final amount = num.tryParse(request.paymentAmount?.toString().trim() ?? '');
+
     if (amount == null || amount <= 0) {
       return ZpCheckoutUrlFailure(
-        'paymentAmount must be a positive number for mode ${request.mode.wireValue}',
+        'paymentAmount must be a positive number '
+        'for mode ${request.mode.wireValue}',
       );
     }
   }
 
   if (request.allowSlicePayOneOffPayment == true &&
       (request.departureDate?.isEmpty ?? true)) {
-    return const ZpCheckoutUrlFailure(_Err.departureDateRequired);
+    return const ZpCheckoutUrlFailure(
+      'departureDate is required when allowSlicePayOneOffPayment is true',
+    );
   }
 
   return null;
 }
 
-Map<String, String> _buildQueryParams(ZpCheckoutUrlRequest request) {
-  return <String, String>{
-    _Param.apiKey: request.apiKey,
-    _Param.fingerprint: request.fingerprint,
-    _Param.timestamp: request.timestamp.value,
-    _Param.merchantUniquePaymentId: request.merchantUniquePaymentId.value,
-    _Param.customerEmail: request.customerEmail,
-    _Param.mode: '${request.mode.wireValue}',
-    _Param.overrideFeePayer: '${request.overrideFeePayer.wireValue}',
-    _Param.userMode: '${request.userMode.wireValue}',
-    _Param.displayMode: '${request.displayMode.wireValue}',
-    _Param.hideHeader: '${request.hideHeader}',
-    _Param.hideTermsAndConditions: '${request.hideTermsAndConditions}',
-    _Param.showFeeOnTokenising: '${request.showFeeOnTokenising}',
-    _Param.showFailedPaymentFeeOnTokenising:
-        '${request.showFailedPaymentFeeOnTokenising}',
-    _Param.sendConfirmationEmailToCustomer:
-        '${request.sendConfirmationEmailToCustomer}',
-    _Param.allowBankAcOneOffPayment: '${request.allowBankAcOneOffPayment}',
-    _Param.allowPayIdOneOffPayment: '${request.allowPayIdOneOffPayment}',
-    _Param.allowApplePayOneOffPayment: '${request.allowApplePayOneOffPayment}',
-    _Param.allowUnionPayOneOffPayment: '${request.allowUnionPayOneOffPayment}',
-    _Param.allowAliPayPlusOneOffPayment:
-        '${request.allowAliPayPlusOneOffPayment}',
-    // ZenPay's browser plugin always sends this; a server-built URL matches
-    // that shape rather than exposing it as a caller-settable option.
-    _Param.isJsPlugin: 'true',
-    if (request.callbackUrl != null) _Param.callbackUrl: request.callbackUrl!,
-    if (request.redirectUrl != null) _Param.redirectUrl: request.redirectUrl!,
-    if (request.sendConfirmationEmailToMerchant != null)
-      _Param.sendConfirmationEmailToMerchant:
-          '${request.sendConfirmationEmailToMerchant!}',
-    if (request.allowPayToOneOffPayment != null)
-      _Param.allowPayToOneOffPayment: '${request.allowPayToOneOffPayment!}',
-    if (request.allowGooglePayOneOffPayment != null)
-      _Param.allowGooglePayOneOffPayment:
-          '${request.allowGooglePayOneOffPayment!}',
-    if (request.allowLatitudePayOneOffPayment != null)
-      _Param.allowLatitudePayOneOffPayment:
-          '${request.allowLatitudePayOneOffPayment!}',
-    if (request.allowSlicePayOneOffPayment != null)
-      _Param.allowSlicePayOneOffPayment:
-          '${request.allowSlicePayOneOffPayment!}',
-    if (request.allowWeChatPayOneOffPayment != null)
-      _Param.allowWeChatPayOneOffPayment:
-          '${request.allowWeChatPayOneOffPayment!}',
-    if (request.allowSaveCardUserOption != null)
-      _Param.allowSaveCardUserOption: '${request.allowSaveCardUserOption!}',
-    if (request.hideMerchantLogo != null)
-      _Param.hideMerchantLogo: '${request.hideMerchantLogo!}',
-    if (request.redirectOnError != null)
-      _Param.redirectOnError: '${request.redirectOnError!}',
-    if (request.customerName != null)
-      _Param.customerName: request.customerName!,
-    if (request.customerReference != null)
-      _Param.customerReference: request.customerReference!,
-    if (request.paymentAmount != null)
-      _Param.paymentAmount: '${request.paymentAmount!}',
-    if (request.customerNameLabel != null)
-      _Param.customerNameLabel: request.customerNameLabel!,
-    if (request.customerReferenceLabel != null)
-      _Param.customerReferenceLabel: request.customerReferenceLabel!,
-    if (request.paymentAmountLabel != null)
-      _Param.paymentAmountLabel: request.paymentAmountLabel!,
-    if (request.title != null) _Param.title: request.title!,
-    if (request.cardProxy != null) _Param.token: request.cardProxy!,
-    if (request.abn != null) _Param.abn: request.abn!,
-    if (request.sku1 != null) _Param.sku1: request.sku1!,
-    if (request.sku2 != null) _Param.sku2: request.sku2!,
-    if (request.additionalReference != null)
-      _Param.additionalReference: request.additionalReference!,
-    if (request.contactNumber != null)
-      _Param.contactNumber: request.contactNumber!,
-    if (request.departureDate != null)
-      _Param.departureDate: request.departureDate!,
-    if (request.companyName != null) _Param.companyName: request.companyName!,
-  };
-}
+Map<String, String> _buildQueryParams(
+  ZpCheckoutUrlRequest request,
+) => <String, String>{
+  '__ApiKey': request.apiKey,
+  '__Fingerprint': request.fingerprint,
+  'timestamp': request.timestamp.value,
+  'merchantUniquePaymentId': request.merchantUniquePaymentId.value,
+  'customerEmail': request.customerEmail,
+  'mode': request.mode.wireValue.toString(),
+  'overrideFeePayer': request.overrideFeePayer.wireValue.toString(),
+  'userMode': request.userMode.wireValue.toString(),
+  'displayMode': request.displayMode.wireValue.toString(),
+  'hideHeader': request.hideHeader.toString(),
+  'hideTermsAndConditions': request.hideTermsAndConditions.toString(),
+  'showFeeOnTokenising': request.showFeeOnTokenising.toString(),
+  'showFailedPaymentFeeOnTokenising': request.showFailedPaymentFeeOnTokenising
+      .toString(),
+  'sendConfirmationEmailToCustomer': request.sendConfirmationEmailToCustomer
+      .toString(),
+  'allowBankAcOneOffPayment': request.allowBankAcOneOffPayment.toString(),
+  'allowPayIdOneOffPayment': request.allowPayIdOneOffPayment.toString(),
+  'allowApplePayOneOffPayment': request.allowApplePayOneOffPayment.toString(),
+  'allowUnionPayOneOffPayment': request.allowUnionPayOneOffPayment.toString(),
+  'allowAliPayPlusOneOffPayment': request.allowAliPayPlusOneOffPayment
+      .toString(),
+  'isJsPlugin': 'true',
+  'callbackUrl': ?request.callbackUrl,
+  'redirectUrl': ?request.redirectUrl,
+  'sendConfirmationEmailToMerchant': ?request.sendConfirmationEmailToMerchant
+      ?.toString(),
+  'allowPayToOneOffPayment': ?request.allowPayToOneOffPayment?.toString(),
+  'allowGooglePayOneOffPayment': ?request.allowGooglePayOneOffPayment
+      ?.toString(),
+  'allowLatitudePayOneOffPayment': ?request.allowLatitudePayOneOffPayment
+      ?.toString(),
+  'allowSlicePayOneOffPayment': ?request.allowSlicePayOneOffPayment?.toString(),
+  'allowWeChatPayOneOffPayment': ?request.allowWeChatPayOneOffPayment
+      ?.toString(),
+  'allowSaveCardUserOption': ?request.allowSaveCardUserOption?.toString(),
+  'hideMerchantLogo': ?request.hideMerchantLogo?.toString(),
+  'redirectOnError': ?request.redirectOnError?.toString(),
+  'customerName': ?request.customerName,
+  'customerReference': ?request.customerReference,
+  'paymentAmount': ?request.paymentAmount?.toString(),
+  'customerNameLabel': ?request.customerNameLabel,
+  'customerReferenceLabel': ?request.customerReferenceLabel,
+  'paymentAmountLabel': ?request.paymentAmountLabel,
+  'title': ?request.title,
+  'token': ?request.cardProxy,
+  'AustralianBusinessNumber': ?request.abn,
+  'sku1': ?request.sku1,
+  'sku2': ?request.sku2,
+  'additionalReference': ?request.additionalReference,
+  'contactNumber': ?request.contactNumber,
+  'departureDate': ?request.departureDate,
+  'companyName': ?request.companyName,
+};
 
 /// Builds the hosted-checkout Authorise URL from [request].
 ZpCheckoutUrlResult createZpCheckoutUrl(ZpCheckoutUrlRequest request) {
-  final validationFailure = validateZpCheckoutUrlRequest(request);
-  if (validationFailure != null) {
-    return validationFailure;
+  final failure = validateZpCheckoutUrlRequest(request);
+
+  if (failure != null) {
+    return failure;
   }
 
-  final path = '${request.merchantCode}/$_authorisePath';
   final base = Uri.parse(request.url);
+
+  final basePath = base.path.endsWith('/')
+      ? base.path.substring(0, base.path.length - 1)
+      : base.path;
+
   final url = base.replace(
-    path: '${base.path}/$path',
+    path: '$basePath/${request.merchantCode}/Authorise',
     queryParameters: _buildQueryParams(request),
   );
 

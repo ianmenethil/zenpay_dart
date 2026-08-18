@@ -1,5 +1,19 @@
-/// The reference backend's HTTP surface: one flat Shelf handler covering
-/// all six routes, request logging, CORS, and error sanitization.
+/// The reference backend's HTTP surface and request pipeline.
+///
+/// Implements a complete Shelf HTTP handler covering:
+/// - Route dispatching across all seven supported endpoints:
+///   - `GET /`: Interactive manual test bench page ([_handleTestPage]).
+///   - `GET /api/v1/health`: Health and readiness probe ([_handleHealth]).
+///   - `GET /.well-known/assetlinks.json`: Android App Links verification ([_handleAssetlinks]).
+///   - `POST /api/v1/sessions`: Checkout session creation ([_handleCreateSession]).
+///   - `GET /api/v1/sessions/:id`: Authoritative checkout status lookup ([_handleGetSession]).
+///   - `POST /api/v1/callbacks`: ZenPay webhook receiver and signature verification ([_handleCallback]).
+///   - `GET /return`: Browser return broker and App Link redirector ([_handleReturn]).
+/// - In-memory rate limiting for API routes and webhook callbacks.
+/// - Constant-time Bearer token authorization.
+/// - JSON body reading with size limits and Content-Type validation.
+/// - Standardized JSON error response formatting and sanitization.
+/// - Structured JSON logging adhering to PCI data protection guidelines.
 library;
 
 import 'dart:convert';
@@ -8,7 +22,9 @@ import 'dart:io';
 import 'package:shelf/shelf.dart' as shelf;
 
 import 'checkout_state.dart';
+import 'checkout_validation.dart' show parseCreateCheckoutBody;
 import 'config.dart';
+import 'html_pages.dart' show frameReturnPageHtml, testPageHtml;
 import 'rate_limiter.dart';
 import 'security.dart'
     show checkCallbackToken, constantTimeEqual, verifyCallback;
@@ -39,10 +55,15 @@ final _callbackLimiter = FixedWindowRateLimiter(
   const Duration(seconds: 60),
 );
 
+/// Enforces that [key] has not exceeded [limiter]'s quota, throwing `HttpError(429)` if breached.
 void _requireRateLimit(FixedWindowRateLimiter limiter, String key) {
   if (!limiter.allow(key)) throw HttpError(429, 'RATE_LIMITED');
 }
 
+/// Validates the `Authorization: Bearer <token>` header against [config.merchantAppBearerToken]
+/// in constant time to prevent timing attacks.
+///
+/// Throws [HttpError] `(401, 'UNAUTHORIZED')` if missing or mismatched.
 void _requireMerchantAuthorization(String? authorization, AppConfig config) {
   final expected = 'Bearer ${config.merchantAppBearerToken}';
   if (authorization == null || !constantTimeEqual(authorization, expected)) {
@@ -50,6 +71,7 @@ void _requireMerchantAuthorization(String? authorization, AppConfig config) {
   }
 }
 
+/// Extracts client IP address from `X-Forwarded-For` header or underlying connection info.
 String _clientIp(shelf.Request request) {
   final forwardedFor = request.headers[_HeaderNames.xForwardedFor];
   final rawIp = forwardedFor?.split(',').first.trim();
@@ -59,6 +81,10 @@ String _clientIp(shelf.Request request) {
   return connectionInfo?.remoteAddress.address ?? 'unknown';
 }
 
+/// Reads and parses a JSON request body with a 64KB maximum size limit.
+///
+/// Ensures full stream draining to prevent mid-write TCP socket resets,
+/// validating `Content-Type: application/json` headers and structure.
 Future<Map<String, Object?>> _readJson(shelf.Request request) async {
   final contentType = request.headers[_HeaderNames.contentType];
   if (contentType == null ||
@@ -90,6 +116,10 @@ Future<Map<String, Object?>> _readJson(shelf.Request request) async {
   return parsed;
 }
 
+/// Constructs a standardized JSON [shelf.Response] with security headers.
+///
+/// Applies `no-store`, `nosniff`, `no-referrer`, and restrictive CSP headers,
+/// optionally attaching CORS access control headers if [allowedOrigin] is provided.
 shelf.Response _json(int status, Object? body, {String? allowedOrigin}) {
   final headers = {
     _HeaderNames.contentType: 'application/json; charset=utf-8',
@@ -105,6 +135,7 @@ shelf.Response _json(int status, Object? body, {String? allowedOrigin}) {
   return shelf.Response(status, body: jsonEncode(body), headers: headers);
 }
 
+/// Creates a `303 See Other` redirect [shelf.Response] to [location].
 shelf.Response _redirect(Uri location) => shelf.Response(
   303,
   headers: {
@@ -114,330 +145,16 @@ shelf.Response _redirect(Uri location) => shelf.Response(
   },
 );
 
-/// Frame return page: `postMessage`s to a fixed origin — never `*`.
-String _frameReturnPageHtml(String targetOrigin, String attempt) {
-  final payload = jsonEncode({
-    'merchantUniquePaymentId': attempt,
-  }).replaceAll('<', '\\u003c');
-  final origin = jsonEncode(targetOrigin).replaceAll('<', '\\u003c');
-  return '<!doctype html>\n'
-      '<meta charset="utf-8">\n'
-      '<title>Returning to app</title>\n'
-      '<script>\n'
-      '  parent.postMessage($payload, $origin);\n'
-      '</script>';
-}
-
+/// Serves the interactive testing interface HTML page at `GET /`.
 shelf.Response _handleTestPage(AppConfig config) => shelf.Response.ok(
-  _testPageHtml(config),
+  testPageHtml(config),
   headers: {
     _HeaderNames.contentType: 'text/html; charset=utf-8',
     'cache-control': 'no-store',
   },
 );
 
-String _testPageHtml(AppConfig config) {
-  final tokenJson = jsonEncode(
-    config.merchantAppBearerToken,
-  ).replaceAll('<', '\\u003c');
-  return '''<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ZenPay Reference Backend Test</title>
-  <style>
-    :root {
-      --bg: #0f172a;
-      --card-bg: #1e293b;
-      --border: #334155;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
-      --error: #ef4444;
-    }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      margin: 0;
-      padding: 2rem 1rem;
-      display: flex;
-      justify-content: center;
-    }
-    .container {
-      max-width: 640px;
-      width: 100%;
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 2rem;
-      box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
-    }
-    h1 { font-size: 1.5rem; margin-top: 0; margin-bottom: 0.5rem; }
-    p.subtitle { color: var(--text-muted); font-size: 0.9rem; margin-top: 0; margin-bottom: 1.5rem; }
-    .btn {
-      background: var(--primary);
-      color: white;
-      border: none;
-      padding: 0.75rem 1.5rem;
-      font-size: 1rem;
-      font-weight: 600;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: background 0.2s;
-      width: 100%;
-    }
-    .btn:hover { background: var(--primary-hover); }
-    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-    .status-panel {
-      margin-top: 1.5rem;
-      padding: 1rem;
-      border-radius: 8px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      display: none;
-    }
-    .status-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
-    .status-row:last-child { margin-bottom: 0; }
-    .label { color: var(--text-muted); font-size: 0.85rem; }
-    .value { font-weight: 600; font-size: 0.95rem; font-family: monospace; }
-    .badge {
-      display: inline-block;
-      padding: 0.25rem 0.65rem;
-      border-radius: 9999px;
-      font-size: 0.8rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .badge-sessionCreated { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
-    .badge-browserReturned { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
-    .badge-successful { background: rgba(34, 197, 94, 0.2); color: #4ade80; }
-    .badge-failed, .badge-cancelled, .badge-error { background: rgba(239, 68, 68, 0.2); color: #f87171; }
-    .error-box {
-      margin-top: 1.5rem;
-      padding: 1rem;
-      border-radius: 8px;
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid var(--error);
-      color: #fca5a5;
-      font-family: monospace;
-      font-size: 0.9rem;
-      display: none;
-      word-break: break-all;
-    }
-    .info-box { margin-top: 1rem; font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h1>ZenPay Reference Backend Test</h1>
-    <p class="subtitle">Create a checkout session and test the payment flow in browser.</p>
-    
-    <button id="create-btn" class="btn" onclick="createCheckout()">Create Test Checkout</button>
-
-    <div id="error-box" class="error-box"></div>
-
-    <div id="status-panel" class="status-panel">
-      <div class="status-row">
-        <span class="label">Status</span>
-        <span id="status-badge" class="badge"></span>
-      </div>
-      <div class="status-row">
-        <span class="label">Payment ID</span>
-        <span id="mupid-val" class="value"></span>
-      </div>
-      <div class="status-row">
-        <span class="label">Poll Count</span>
-        <span id="poll-val" class="value">0 / 40</span>
-      </div>
-    </div>
-
-    <div class="info-box">
-      Note: Local development bearer token embedded in test page JS.
-    </div>
-  </div>
-
-  <script>
-    const BEARER_TOKEN = $tokenJson;
-    let pollInterval = null;
-    let pollCount = 0;
-
-    async function createCheckout() {
-      const btn = document.getElementById('create-btn');
-      const errBox = document.getElementById('error-box');
-      const panel = document.getElementById('status-panel');
-      const mupidVal = document.getElementById('mupid-val');
-
-      errBox.style.display = 'none';
-      panel.style.display = 'none';
-      btn.disabled = true;
-
-      if (pollInterval) clearInterval(pollInterval);
-      pollCount = 0;
-
-      const idempotencyKey = 'test-' + Date.now();
-      const orderId = 'ord-' + Date.now();
-
-      try {
-        const response = await fetch('/api/v1/sessions', {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + BEARER_TOKEN,
-            'Idempotency-Key': idempotencyKey,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            orderId: orderId,
-            customerName: 'Test Customer',
-            customerEmail: 'test@example.com',
-            client: 'web',
-            paymentAmount: 10.00
-          })
-        });
-
-        const data = await response.json().catch(() => ({ error: 'NON_JSON_RESPONSE' }));
-
-        if (!response.ok) {
-          errBox.textContent = 'Error (' + response.status + '): ' + (data.error || JSON.stringify(data));
-          errBox.style.display = 'block';
-          btn.disabled = false;
-          return;
-        }
-
-        window.open(data.checkoutUrl, '_blank');
-
-        panel.style.display = 'block';
-        mupidVal.textContent = data.merchantUniquePaymentId;
-        updateBadge('sessionCreated');
-
-        pollStatus(data.merchantUniquePaymentId);
-        pollInterval = setInterval(() => pollStatus(data.merchantUniquePaymentId), 3000);
-
-      } catch (err) {
-        errBox.textContent = 'Network / Request Error: ' + err.message;
-        errBox.style.display = 'block';
-      } finally {
-        btn.disabled = false;
-      }
-    }
-
-    function updateBadge(status) {
-      const badge = document.getElementById('status-badge');
-      badge.textContent = status;
-      badge.className = 'badge badge-' + status;
-    }
-
-    async function pollStatus(mupid) {
-      pollCount++;
-      document.getElementById('poll-val').textContent = pollCount + ' / 40';
-
-      try {
-        const response = await fetch('/api/v1/sessions/' + encodeURIComponent(mupid), {
-          headers: {
-            'Authorization': 'Bearer ' + BEARER_TOKEN
-          }
-        });
-        if (response.ok) {
-          const data = await response.json();
-          updateBadge(data.status);
-
-          const terminal = ['successful', 'failed', 'cancelled', 'error'];
-          if (terminal.includes(data.status) || pollCount >= 40) {
-            clearInterval(pollInterval);
-            pollInterval = null;
-          }
-        }
-      } catch (e) {
-        // Ignore transient poll errors
-      }
-    }
-  </script>
-</body>
-</html>''';
-}
-
-const _allowedCheckoutKeys = {
-  'orderId',
-  'customerName',
-  'customerEmail',
-  'mode',
-  'client',
-  'paymentAmount',
-  'customerReference',
-  'contactNumber',
-};
-
-final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
-
-CreateCheckoutBody _parseCreateCheckoutBody(Map<String, Object?> value) {
-  for (final key in value.keys) {
-    if (!_allowedCheckoutKeys.contains(key)) {
-      throw HttpError(400, 'UNKNOWN_CHECKOUT_FIELD');
-    }
-  }
-
-  final orderId = value['orderId'];
-  if (orderId is! String ||
-      orderId.trim().isEmpty ||
-      orderId.trim().length > 128) {
-    throw HttpError(400, 'INVALID_CHECKOUT_REQUEST');
-  }
-  final customerName = value['customerName'];
-  if (customerName is! String ||
-      customerName.trim().isEmpty ||
-      customerName.trim().length > 250) {
-    throw HttpError(400, 'INVALID_CHECKOUT_REQUEST');
-  }
-  final customerEmail = value['customerEmail'];
-  if (customerEmail is! String ||
-      customerEmail.trim().isEmpty ||
-      customerEmail.trim().length > 254 ||
-      !_emailPattern.hasMatch(customerEmail.trim())) {
-    throw HttpError(400, 'INVALID_CHECKOUT_REQUEST');
-  }
-  final modeRaw = value['mode'];
-  if (modeRaw != null && (modeRaw is! int || modeRaw < 0 || modeRaw > 3)) {
-    throw HttpError(400, 'INVALID_CHECKOUT_MODE');
-  }
-  final client = switch (value['client']) {
-    final String c => CheckoutClient.tryParse(c),
-    _ => null,
-  };
-  if (client == null) throw HttpError(400, 'INVALID_CHECKOUT_CLIENT');
-  final paymentAmount = value['paymentAmount'];
-  if (paymentAmount is! num || paymentAmount <= 0 || paymentAmount > 999999) {
-    throw HttpError(400, 'INVALID_CHECKOUT_AMOUNT');
-  }
-  final customerReferenceRaw = value['customerReference'];
-  if (customerReferenceRaw != null &&
-      (customerReferenceRaw is! String ||
-          customerReferenceRaw.trim().isEmpty ||
-          customerReferenceRaw.trim().length > 128)) {
-    throw HttpError(400, 'INVALID_CHECKOUT_REFERENCE');
-  }
-  final contactNumberRaw = value['contactNumber'];
-  if (contactNumberRaw != null &&
-      (contactNumberRaw is! String ||
-          contactNumberRaw.trim().isEmpty ||
-          contactNumberRaw.trim().length > 32)) {
-    throw HttpError(400, 'INVALID_CHECKOUT_CONTACT_NUMBER');
-  }
-
-  return CreateCheckoutBody(
-    orderId: orderId.trim(),
-    customerName: customerName.trim(),
-    customerEmail: customerEmail.trim(),
-    client: client,
-    paymentAmount: paymentAmount,
-    mode: modeRaw as int?,
-    customerReference: (customerReferenceRaw as String?)?.trim(),
-    contactNumber: (contactNumberRaw as String?)?.trim(),
-  );
-}
-
+/// Answers `GET /api/v1/health` with service status and configuration readiness.
 shelf.Response _handleHealth(AppConfig config) {
   final missingSession = sessionConfigurationErrors(config);
   final missingCallback = callbackConfigurationErrors(config);
@@ -450,6 +167,7 @@ shelf.Response _handleHealth(AppConfig config) {
   });
 }
 
+/// Serves Android App Links Digital Asset Links JSON at `GET /.well-known/assetlinks.json`.
 Future<shelf.Response> _handleAssetlinks() async {
   final file = File(
     '${Directory.current.path}/../app/platform_config/android/assetlinks.json',
@@ -461,6 +179,10 @@ Future<shelf.Response> _handleAssetlinks() async {
   );
 }
 
+/// Handles `POST /api/v1/sessions` to initiate a checkout session.
+///
+/// Authenticates the merchant Bearer token, enforces idempotency, validates
+/// payload fields, generates the HCP launch URL, and registers the attempt.
 Future<shelf.Response> _handleCreateSession(
   shelf.Request request,
   AppConfig config,
@@ -485,7 +207,7 @@ Future<shelf.Response> _handleCreateSession(
   }
 
   final rawBody = await _readJson(request);
-  final body = _parseCreateCheckoutBody(rawBody);
+  final body = parseCreateCheckoutBody(rawBody);
   logEvent('checkout_request_received', {
     'stage': 'client > making request to our backend',
     'mode': body.mode ?? 0,
@@ -502,6 +224,7 @@ Future<shelf.Response> _handleCreateSession(
   return _json(201, session.toJson(), allowedOrigin: config.allowedAppOrigin);
 }
 
+/// Handles `GET /api/v1/sessions/:id` for authoritative payment status polling.
 shelf.Response _handleGetSession(
   shelf.Request request,
   Uri requestedUri,
@@ -533,6 +256,10 @@ shelf.Response _handleGetSession(
   }, allowedOrigin: config.allowedAppOrigin);
 }
 
+/// Handles `POST /api/v1/callbacks` receiving asynchronous webhook notifications from ZenPay.
+///
+/// Authenticates webhook cryptographic signatures, validates attempt correlation,
+/// detects conflicts, and updates the attempt status and transaction references.
 Future<shelf.Response> _handleCallback(
   shelf.Request request,
   AppConfig config,
@@ -639,6 +366,11 @@ const _terminalStatuses = {
   MerchantPaymentStatus.error,
 };
 
+/// Handles `GET /return` receiving customer browser redirects from ZenPay Hosted Payment Page.
+///
+/// Updates attempt status to `browserReturned` (unless already in a terminal state),
+/// then renders a `postMessage` landing page for `webFrame` clients or issues a
+/// 303 redirect to the App Link / web origin for mobile / web clients.
 shelf.Response _handleReturn(
   Uri requestedUri,
   AppConfig config,
@@ -666,7 +398,7 @@ shelf.Response _handleReturn(
 
   if (attempt.client == CheckoutClient.webFrame) {
     return shelf.Response.ok(
-      _frameReturnPageHtml(
+      frameReturnPageHtml(
         config.allowedAppOrigin,
         attempt.merchantUniquePaymentId,
       ),
@@ -686,6 +418,7 @@ shelf.Response _handleReturn(
   return _redirect(appReturn);
 }
 
+/// Dispatches an incoming [request] to the appropriate endpoint handler based on method and path.
 Future<shelf.Response> _dispatch(
   shelf.Request request,
   AppConfig config,
@@ -721,9 +454,10 @@ Future<shelf.Response> _dispatch(
 
 final _sanitizePattern = RegExp(r'[^A-Za-z0-9_:.-]');
 
-/// Builds the single Shelf [shelf.Handler] serving all seven routes: request
-/// logging (path only, never the query string), CORS preflight, dispatch,
-/// and sanitized error responses.
+/// Builds the top-level Shelf [shelf.Handler] serving all reference backend routes.
+///
+/// Handles CORS preflight `OPTIONS` requests, dispatches routes via [_dispatch],
+/// sanitizes error responses, and emits structured audit logs.
 shelf.Handler buildHandler(AppConfig config, AttemptStore store) {
   return (shelf.Request request) async {
     final startTime = DateTime.now();
@@ -783,8 +517,10 @@ shelf.Handler buildHandler(AppConfig config, AttemptStore store) {
 
 const _encoder = JsonEncoder.withIndent('  ');
 
-/// Writes an indented JSON log line. Fields must be pre-redacted by the
-/// caller — see `docs/SECURITY_AND_PCI.md` for what must never appear here.
+/// Emits a structured JSON log entry to standard output or standard error.
+///
+/// Caller must ensure that sensitive credentials (passwords, card details, secrets)
+/// are strictly redacted prior to logging to maintain PCI-DSS compliance.
 void logEvent(
   String event, [
   Map<String, Object?> fields = const {},

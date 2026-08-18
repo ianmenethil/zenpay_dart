@@ -4,21 +4,24 @@ This document outlines all source files in the reference merchant backend (`exam
 
 ---
 
-## 1. `lib/src/checkout_state.dart`
+## 1. `lib/src/checkout_state.dart`, `lib/src/models.dart`, `lib/src/attempt_store.dart`
 
-**File Path:** [example/lib/src/checkout_state.dart](file:///g:/_zp-repos/zp-flutter-sdk/backend/example/lib/src/checkout_state.dart)  
-**Overview:** Defines the domain models, payment status lifecycle enums, ZenPay status mapping logic, and the in-memory `AttemptStore` tracking active checkout sessions.
+**File Path:** [example/lib/src/checkout_state.dart](file:///g:/_zp-repos/zp-flutter-sdk/backend/example/lib/src/checkout_state.dart) (barrel) · [example/lib/src/models.dart](file:///g:/_zp-repos/zp-flutter-sdk/backend/example/lib/src/models.dart) (domain types) · [example/lib/src/attempt_store.dart](file:///g:/_zp-repos/zp-flutter-sdk/backend/example/lib/src/attempt_store.dart) (repository)  
+**Overview:** `checkout_state.dart` is a thin barrel (`export 'models.dart'; export 'attempt_store.dart';`) kept so existing imports of it keep working. `models.dart` defines the domain models, payment status lifecycle enums, and ZenPay status mapping logic. `attempt_store.dart` defines the in-memory `AttemptStore` repository that tracks active checkout sessions.
 
+**`models.dart`:**
 - **`enum CheckoutClient`**: Distinguishes client presentation modes (`web`, `webFrame`, `mobile`) to prevent open redirects; used in `POST /api/v1/sessions` and `appReturnUriFor`.
-- **`CheckoutClient.tryParse(String value)`**: Parses wire strings (`"web"`, `"webFrame"`, `"mobile"`) into the enum; used in `_parseCreateCheckoutBody` during request validation.
+- **`CheckoutClient.tryParse(String value)`**: Parses wire strings (`"web"`, `"webFrame"`, `"mobile"`) into the enum; used in `parseCreateCheckoutBody` during request validation.
 - **`enum MerchantPaymentStatus`**: Models the merchant-facing payment lifecycle states (`created`, `sessionCreated`, `browserReturned`, `pending`, `successful`, `failed`, `cancelled`, `error`, `unknown`); stored on `CheckoutAttempt.status` and returned in status lookup polling.
 - **`_zpPaymentStatusFromWireValue(int value)`**: Maps integer status codes from ZenPay's callback format to `ZpPaymentStatus`; used internally by `mapZenPayStatus`.
 - **`mapZenPayStatus(int statusCode)`**: Translates ZenPay wire status integers into simplified `MerchantPaymentStatus` values; used in `_handleCallback` when applying callback results.
 - **`class CheckoutAttempt`**: Central entity tracking correlation IDs, order metadata, launch URLs, and verified callback results; managed in `AttemptStore` across the full payment lifecycle.
 - **`CheckoutAttempt.copyWith(...)`**: Creates an immutable copy with updated status or callback fields; used during state transitions in `createSession`, `_handleCallback`, and `_handleReturn`.
-- **`class CreateCheckoutBody`**: Strongly typed model representing a validated `POST /api/v1/sessions` request body; constructed by `_parseCreateCheckoutBody` and consumed by `createSession`.
+- **`class CreateCheckoutBody`**: Strongly typed model representing a validated `POST /api/v1/sessions` request body; constructed by `parseCreateCheckoutBody` and consumed by `createSession`.
 - **`class AppCheckoutSession`**: Data transfer object holding `merchantUniquePaymentId` and `checkoutUrl`; returned by `createSession` and serialized in `_handleCreateSession`.
 - **`class HttpError`**: Exception carrying an HTTP status code and machine-readable error code string; thrown during request processing and converted to JSON errors in `buildHandler`.
+
+**`attempt_store.dart`:**
 - **`class AttemptStoreError`**: Internal error thrown on unexpected storage invariant violations (e.g. ID collisions); caught in `buildHandler` to emit sanitized 500 responses.
 - **`class AttemptStore`**: In-memory repository for `CheckoutAttempt` records indexed by payment ID and idempotency key; instantiated in `bin/server.dart` and injected into route handlers.
 - **`AttemptStore.create(CheckoutAttempt attempt)`**: Inserts a new attempt record and maps its idempotency key; called by `createSession` when initiating a new checkout.
@@ -63,17 +66,36 @@ This document outlines all source files in the reference merchant backend (`exam
 **Overview:** Provides security primitives, timing-safe string comparison, and callback verification against ZenPay cryptographic standards.
 
 - **`constantTimeEqual(String a, String b)`**: Compares strings in constant time using SHA-256 digest equality to prevent timing attacks; used in `_requireMerchantAuthorization` and callback reference verification.
-- **`class CallbackFields`**: Immutable data structure holding the 4 fields (`reference`, `statusCode`, `failureCode`, `failureReason`) copied out of a verified `ZpCallbackVerified` — out of ~27 fields the SDK now returns, the rest (business/reconciliation metadata) are not extracted; returned in `CallbackVerification.ok` and applied to `CheckoutAttempt` in `_handleCallback`.
+- **`class CallbackFields`**: Immutable data structure holding the 4 fields (`reference`, `statusCode`, `failureCode`, `failureReason`) copied out of a verified `ZpCallbackVerified` — out of ~29 fields the SDK now returns, the rest (business/reconciliation metadata) are not extracted; returned in `CallbackVerification.ok` and applied to `CheckoutAttempt` in `_handleCallback`.
 - **`class CallbackVerification`**: Result type representing successful verification (`ok`) or rejection reason (`rejected`); returned by `verifyCallback` to communicate authentication outcomes.
 - **`verifyCallback(Map<String, Object?> payload, CheckoutAttempt attempt, ZenPayCredentials credentials)`**: Authenticates an incoming webhook payload's `ValidationCode` HMAC-SHA3-512 signature against attempt details via `package:zenpay_dart`; called in `_handleCallback`.
 - **`checkCallbackToken(String? tokenRaw, String secret)`**: Validates the optional signed `?t=` HMAC token on callback URLs for telemetry; called in `_handleCallback` without gating callback acceptance.
 
 ---
 
-## 5. `lib/src/server_app.dart`
+## 5. `lib/src/html_pages.dart`
+
+**File Path:** [example/lib/src/html_pages.dart](file:///g:/_zp-repos/zp-flutter-sdk/backend/example/lib/src/html_pages.dart)  
+**Overview:** Pure HTML-string builders for the two page responses the backend serves — no Shelf types, no I/O.
+
+- **`frameReturnPageHtml(String targetOrigin, String attempt)`**: Builds the iframe return page that `postMessage`s completion data to `window.parent` against a fixed target origin (never `*`); used in `_handleReturn` (`server_app.dart`) for `webFrame` clients.
+- **`testPageHtml(AppConfig config)`**: Builds the interactive HTML/JS testing interface for manual checkout flow verification; used by `_handleTestPage` (`server_app.dart`) for root `GET /`.
+
+---
+
+## 6. `lib/src/checkout_validation.dart`
+
+**File Path:** [example/lib/src/checkout_validation.dart](file:///g:/_zp-repos/zp-flutter-sdk/backend/example/lib/src/checkout_validation.dart)  
+**Overview:** Validates and parses the `POST /api/v1/sessions` request body.
+
+- **`parseCreateCheckoutBody(Map<String, Object?> value)`**: Validates required fields, lengths, email formats, and parameter constraints for session requests, rejecting unknown fields; called in `_handleCreateSession` (`server_app.dart`).
+
+---
+
+## 7. `lib/src/server_app.dart`
 
 **File Path:** [example/lib/src/server_app.dart](file:///g:/_zp-repos/zp-flutter-sdk/backend/example/lib/src/server_app.dart)  
-**Overview:** Implements the complete HTTP routing surface with Shelf, covering CORS preflight, error sanitization, request logging, and route dispatching.
+**Overview:** Implements the complete HTTP routing surface with Shelf, covering CORS preflight, error sanitization, request logging, and route dispatching. HTML page bodies live in `html_pages.dart`; request-body validation lives in `checkout_validation.dart`.
 
 - **`abstract final class _HeaderNames`**: Standardized HTTP header string constants; used across request parsing and response building in `server_app.dart`.
 - **`_requireRateLimit(FixedWindowRateLimiter limiter, String key)`**: Enforces rate limits, throwing `HttpError(429)` if exceeded; guards session, status, and callback endpoints.
@@ -82,22 +104,20 @@ This document outlines all source files in the reference merchant backend (`exam
 - **`_readJson(shelf.Request request)`**: Parses JSON request bodies with a 64KB size cap and Content-Type checks; used in `_handleCreateSession` and `_handleCallback`.
 - **`_json(int status, Object? body, {String? allowedOrigin})`**: Constructs JSON responses with security headers (`nosniff`, `no-store`, CSP); used by all API endpoints.
 - **`_redirect(Uri location)`**: Generates a `303 See Other` response redirecting non-`webFrame` clients back to the merchant — an App Link URI for `mobile`, a plain web origin (`config.appReturnUriWeb`) for `web`; used in `_handleReturn`.
-- **`_frameReturnPageHtml(String targetOrigin, String attempt)`**: Generates an HTML response that `postMessage`s completion data to `window.parent` against a fixed target origin; used in `_handleReturn` for `webFrame` clients.
-- **`_handleTestPage(AppConfig config)` & `_testPageHtml(AppConfig config)`**: Serves an interactive HTML/JS testing interface at `GET /` for manual checkout flow verification; dispatched for root `GET /`.
-- **`_parseCreateCheckoutBody(Map<String, Object?> value)`**: Validates required fields, lengths, email formats, and parameter constraints for session requests; called in `_handleCreateSession`.
+- **`_handleTestPage(AppConfig config)`**: Serves `testPageHtml` (`html_pages.dart`) at `GET /` for manual checkout flow verification.
 - **`_handleHealth(AppConfig config)`**: Answers `GET /api/v1/health` with service availability and configuration readiness indicators; used for health checks and startup polling in `run.ps1`.
 - **`_handleAssetlinks()`**: Serves `/.well-known/assetlinks.json` for Android App Links verification; dispatched for `GET /.well-known/assetlinks.json`.
-- **`_handleCreateSession(shelf.Request request, AppConfig config, AttemptStore store)`**: Authenticates requests, generates launch URLs via `createSession`, and stores attempts; handles `POST /api/v1/sessions`.
+- **`_handleCreateSession(shelf.Request request, AppConfig config, AttemptStore store)`**: Authenticates requests, validates the body via `parseCreateCheckoutBody` (`checkout_validation.dart`), generates launch URLs via `createSession`, and stores attempts; handles `POST /api/v1/sessions`.
 - **`_handleGetSession(shelf.Request request, Uri requestedUri, AppConfig config, AttemptStore store)`**: Returns authoritative payment state and callback details for an attempt; handles `GET /api/v1/sessions/:id`.
 - **`_handleCallback(shelf.Request request, AppConfig config, AttemptStore store)`**: Processes ZenPay webhooks, verifies cryptographic signatures, and updates attempt payment status; handles `POST /api/v1/callbacks`.
-- **`_handleReturn(Uri requestedUri, AppConfig config, AttemptStore store)`**: Processes ZenPay browser redirects, validates correlation IDs, updates attempt status, and forwards to the app; handles `GET /return`.
+- **`_handleReturn(Uri requestedUri, AppConfig config, AttemptStore store)`**: Processes ZenPay browser redirects, validates correlation IDs, updates attempt status, and forwards to the app (via `frameReturnPageHtml` from `html_pages.dart` for `webFrame` clients); handles `GET /return`.
 - **`_dispatch(shelf.Request request, AppConfig config, AttemptStore store)`**: Routes incoming HTTP requests to their matching route handlers; called by `buildHandler`.
 - **`buildHandler(AppConfig config, AttemptStore store)`**: Assembles the top-level Shelf pipeline with CORS preflight, error formatting, and structured logging; passed to `shelf_io.serve` in `bin/server.dart`.
 - **`logEvent(String event, [Map<String, Object?> fields, bool isError])`**: Emits structured JSON log lines to stdout/stderr without logging sensitive payment credentials; used across all request and lifecycle events.
 
 ---
 
-## 6. `lib/src/session_service.dart`
+## 8. `lib/src/session_service.dart`
 
 **File Path:** [example/lib/src/session_service.dart](file:///g:/_zp-repos/zp-flutter-sdk/backend/example/lib/src/session_service.dart)  
 **Overview:** Coordinates checkout session creation, idempotency validation, cryptographic fingerprinting, and HCP Authorise launch URL construction.
